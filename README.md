@@ -1,3 +1,6 @@
+# DocumentSummarizer
+Yoon's code modified for Final Project for CS287, Harvard University, Spring 16
+
 ## Sequence-to-Sequence Learning with Attentional Neural Networks
 
 [Torch](http://torch.ch) implementation of a standard sequence-to-sequence model with attention
