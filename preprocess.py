@@ -10,6 +10,7 @@ import argparse
 import numpy as np
 import h5py
 import itertools
+import pdb
 from collections import defaultdict
 
 class Indexer:
@@ -34,7 +35,7 @@ class Indexer:
 
     def clean(self, s):
         s = s.replace(self.PAD, "")
-#        s = s.replace(self.UNK, "")
+#        s = s.replace(self.UNK, "") # why is this commented out?
         s = s.replace(self.BOS, "")
         s = s.replace(self.EOS, "")
         return s
