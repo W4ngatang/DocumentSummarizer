@@ -15,12 +15,12 @@ from collections import defaultdict
 
 class Indexer:
     def __init__(self, symbols = ["*blank*","<unk>","<s>","</s>"]):
-        self.vocab = defaultdict(int)
+        self.vocab = defaultdict(int) # special dictionary type for counting
         self.PAD = symbols[0]
         self.UNK = symbols[1]
         self.BOS = symbols[2]
         self.EOS = symbols[3]
-        self.d = {self.PAD: 1, self.UNK: 2, self.BOS: 3, self.EOS: 4}
+        self.d = {self.PAD: 1, self.UNK: 2, self.BOS: 3, self.EOS: 4} # should there be an BOD/EOD?
 
     def add_w(self, ws):
         for w in ws:
@@ -74,94 +74,92 @@ def get_data(args):
     char_indexer = Indexer(["<blank>","<unk>","{","}"])
     char_indexer.add_w([src_indexer.PAD, src_indexer.UNK, src_indexer.BOS, src_indexer.EOS])
     
-    def make_vocab(srcfile, targetfile, seqlength, max_word_l=0, chars=0):
-        num_sents = 0
+    def make_vocab(srcfile, targetfile, seqlength, max_sent_l=0):
+        num_docs = 0
         for _, (src_orig, targ_orig) in \
                 enumerate(itertools.izip(open(srcfile,'r'), open(targetfile,'r'))):
             src_orig = src_indexer.clean(src_orig.decode("utf-8").strip())
             targ_orig = target_indexer.clean(targ_orig.decode("utf-8").strip())
-            targ = targ_orig.strip().split()
-            src = src_orig.strip().split()
+            targ = targ_orig.strip().split("</s>")    # should split on sentence divider
+            src = src_orig.strip().split("</s>")      # same here
             if len(targ) > seqlength or len(src) > seqlength or len(targ) < 1 or len(src) < 1:
                 continue
-            num_sents += 1
-            for word in targ:
-                if chars == 1:
-                    word = char_indexer.clean(word)
-                    if len(word) == 0:
-                        continue
-                    max_word_l = max(len(word)+2, max_word_l)
-                    for char in list(word):
-                        char_indexer.vocab[char] += 1                                        
-                target_indexer.vocab[word] += 1
+            num_docs += 1
+            for sent in targ:
+                sent = word_indexer.clean(sent)
+                if len(sent) == 0:
+                    continue
+                max_sent_l = max(len(sent)+2, max_sent_l)
+                words = sent.split()
+                for word in words:
+                    word_indexer.vocab[word] += 1                                        
+                #target_indexer.vocab[sent] += 1
                 
-            for word in src:
-                if chars == 1:
-                    word = char_indexer.clean(word)
-                    if len(word) == 0:
-                        continue
-                    max_word_l = max(len(word)+2, max_word_l)
-                    for char in list(word):
-                        char_indexer.vocab[char] += 1                    
-                src_indexer.vocab[word] += 1
+            for sent in src:
+                sent = word_indexer.clean(sent)
+                if len(sent) == 0:
+                    continue
+                max_sent_l = max(len(sent)+2, max_sent_l)
+                words = sent.split()
+                for word in words:
+                    word_indexer.vocab[word] += 1                                        
+                #src_indexer.vocab[sent] += 1
                 
         return max_word_l, num_sents
                 
-    def convert(srcfile, targetfile, batchsize, seqlength, outfile, num_sents,
-                max_word_l, max_sent_l=0,chars=0, unkfilter=0):
+    def convert(srcfile, targetfile, batchsize, seqlength, outfile, num_docs,
+                max_sent_l, max_doc_l=0, unkfilter=0):
         
-        newseqlength = seqlength + 2 #add 2 for EOS and BOS
-        targets = np.zeros((num_sents, newseqlength), dtype=int)
-        target_output = np.zeros((num_sents, newseqlength), dtype=int)
-        sources = np.zeros((num_sents, newseqlength), dtype=int)
-        source_lengths = np.zeros((num_sents,), dtype=int)
-        target_lengths = np.zeros((num_sents,), dtype=int)
-        if chars==1:
-            sources_char = np.zeros((num_sents, newseqlength, max_word_l), dtype=int)
-            targets_char = np.zeros((num_sents, newseqlength, max_word_l), dtype=int)
+        newseqlength = seqlength + 2 #add 2 for EOS and BOS; TODO wasn't this already accounted for?
+        #targets = np.zeros((num_sents, newseqlength), dtype=int) # TODO rename this block
+        #target_output = np.zeros((num_sents, newseqlength), dtype=int)
+        #sources = np.zeros((num_sents, newseqlength), dtype=int)
+        source_lengths = np.zeros((num_docs,), dtype=int)
+        target_lengths = np.zeros((num_docs,), dtype=int)
+        sources_word = np.zeros((num_docs, newseqlength, max_sent_l), dtype=int)
+        targets_word = np.zeros((num_docs, newseqlength, max_sent_l), dtype=int)
         dropped = 0
-        sent_id = 0
+        doc_id = 0
         for _, (src_orig, targ_orig) in \
                 enumerate(itertools.izip(open(srcfile,'r'), open(targetfile,'r'))):
             src_orig = src_indexer.clean(src_orig.decode("utf-8").strip())
             targ_orig = target_indexer.clean(targ_orig.decode("utf-8").strip())
-            targ = [target_indexer.BOS] + targ_orig.strip().split() + [target_indexer.EOS]
-            src =  [src_indexer.BOS] + src_orig.strip().split() + [src_indexer.EOS]
-            max_sent_l = max(len(targ), len(src), max_sent_l)
+            targ = [target_indexer.BOD] + targ_orig.strip().split("</s>") + [target_indexer.EOD]
+            src = [src_indexer.BOD] + src_orig.strip().split("</s>") + [src_indexer.EOD]
+            max_doc_l = max(len(targ), len(src), max_doc_l)
             if len(targ) > newseqlength or len(src) > newseqlength or len(targ) < 3 or len(src) < 3:
                 dropped += 1
                 continue                   
             targ = pad(targ, newseqlength+1, target_indexer.PAD)
-            targ_char = []
-            for word in targ:
-                if chars == 1:
-                    word = char_indexer.clean(word)
+            targ_word = []
+            for sent in targ:
+                sent = word_indexer.clean(sent)
                 #use UNK for target, but not for source
-                word = word if word in target_indexer.d else target_indexer.UNK
-                if chars == 1:
-                    char = [char_indexer.BOS] + list(word) + [char_indexer.EOS]
-                    if len(char) > max_word_l:
-                        char = char[:max_word_l]
-                        char[-1] = char_indexer.EOS
-                    char_idx = char_indexer.convert_sequence(pad(char, max_word_l, char_indexer.PAD))
-                    targ_char.append(char_idx)                    
-            targ = target_indexer.convert_sequence(targ)
-            targ = np.array(targ, dtype=int)
+                #word = word if word in target_indexer.d else target_indexer.UNK
+                word = [word_indexer.BOS] + sent.split() + [word_indexer.EOS]
+                if len(word) > max_sent_l:
+                    word = word[:max_sent_l]
+                    word[-1] = word_indexer.EOS
+                word_idx = word_indexer.convert_sequence(pad(word, max_sent_l, word_indexer.PAD))
+                targ_word.append(word_idx)                    
+            #targ = target_indexer.convert_sequence(targ)
+            #targ = np.array(targ, dtype=int)
 
             src = pad(src, newseqlength, src_indexer.PAD)
-            src_char = []
-            for word in src:
-                if chars == 1:
-                    word = char_indexer.clean(word)
-                    char = [char_indexer.BOS] + list(word) + [char_indexer.EOS]
-                    if len(char) > max_word_l:
-                        char = char[:max_word_l]
-                        char[-1] = char_indexer.EOS
-                    char_idx = char_indexer.convert_sequence(pad(char, max_word_l, char_indexer.PAD))
-                    src_char.append(char_idx)
-            src = src_indexer.convert_sequence(src)
-            src = np.array(src, dtype=int)
+            src_word = []
+            for sent in src:
+                sent = word_indexer.clean(sent)
+                word = [word_indexer.BOS] + sent.split() + [word_indexer.EOS]
+                if len(word) > max_sent_l:
+                    word = word[:max_sent_l]
+                    word[-1] = word_indexer.EOS
+                word_idx = word_indexer.convert_sequence(pad(word, max_sent_l, word_indexer.PAD))
+                src_word.append(word_idx)
+            #src = src_indexer.convert_sequence(src)
+            #src = np.array(src, dtype=int)
             
+            # TODO unknown filtering for targ/src_word?
+            '''
             if unkfilter > 0:
                 targ_unks = float((targ[:-1] == 2).sum())
                 src_unks = float((src == 2).sum())                
@@ -171,22 +169,22 @@ def get_data(args):
                 if targ_unks > unkfilter or src_unks > unkfilter:
                     dropped += 1
                     continue
+            '''
                 
-            targets[sent_id] = np.array(targ[:-1],dtype=int)
-            target_lengths[sent_id] = (targets[sent_id] != 1).sum()
-            if chars == 1:
-                targets_char[sent_id] = np.array(targ_char[:-1], dtype=int)
-            target_output[sent_id] = np.array(targ[1:],dtype=int)                    
-            sources[sent_id] = np.array(src, dtype=int)
-            source_lengths[sent_id] = (sources[sent_id] != 1).sum()            
-            if chars == 1:
-                sources_char[sent_id] = np.array(src_char, dtype=int)
+            # targ has been padded to len seqlen+1
+            #targets[doc_id] = np.array(targ[:-1],dtype=int) # get all but the last pad
+            #target_lengths[doc_id] = (targets[doc_id] != 1).sum() # get the length of the sequence (w/o pad)
+            targets_word[doc_id] = np.array(targ_word[:-1], dtype=int)
+            #target_output[doc_id] = np.array(targ[1:],dtype=int)                    
+            #sources[sent_id] = np.array(src, dtype=int)
+            #source_lengths[doc_id] = (sources[doc_id] != 1).sum()            
+            source_word[doc_id] = np.array(src_word, dtype=int)
 
-            sent_id += 1
-            if sent_id % 100000 == 0:
-                print("{}/{} sentences processed".format(sent_id, num_sents))
+            doc_id += 1
+            if not (doc_id % 100000):
+                print("{}/{} sentences processed".format(doc_id, num_docs))
 
-        print(sent_id, num_sents)
+        print(doc_id, num_docs)
         #break up batches based on source lengths
         source_lengths = source_lengths[:sent_id]
         source_sort = np.argsort(source_lengths) 
