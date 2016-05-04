@@ -27,8 +27,8 @@ def entity_overlap(src, targ):
                     entities.extend(entitify(child))
         return set(entities)
 
-    def get_entities(doc):
-        sentences = nltk.sent_tokenize(doc) # some nltk preprocessing: tokenize, tag, chunk, NER
+    def get_entities(sentences):
+        #sentences = nltk.sent_tokenize(doc) # some nltk preprocessing: tokenize, tag, chunk, NER
         tokenized_sentences = [nltk.word_tokenize(sentence) for sentence in sentences]
         tagged_sentences = [nltk.pos_tag(sentence) for sentence in tokenized_sentences]
         chunked_sentences = nltk.batch_ne_chunk(tagged_sentences, binary=True)
@@ -90,10 +90,10 @@ def featurize(source, targ, weights, thresh):
         bi = len(set(src_bi) & set(targ_bi))
         return float(uni), float(bi)
 
-    num_entities = entity_overlap(source.replace("</s>", ""), targ.replace("</s>", "")) # get #entity overlap per sentence
-    sentences = [clean_string(s) for s in source.strip().split("</s>")]
+    num_entities = entity_overlap(source.split("</s>"), targ.split("</s>")) # get #entity overlap per sentence
+    sentences = [clean_string(s) for s in source.split("</s>")]
     indicators = []
-    if len(num_entities) != len(sentences[1:]):
+    if len(num_entities) != len(sentences):
         return [0] # when NLTK messes up
     for i, sentence in enumerate(sentences[1:]): # artifact of split having leading ''
         uni, bi = gram_feats(sentence, targ) # below, take dot product of weights and features
@@ -141,11 +141,11 @@ def main(arguments):
     parser.add_argument('targfile', help="Path to target training data. ", type = str)
     parser.add_argument('--outfile', help="Prefix of the output file names. ", type=str, default="extract")
     parser.add_argument('--split', help="Fraction of the data in train/valid. ", type=float, default=.8)
-    parser.add_argument('--uni', help="Unigram weight. ", type=float, default=1.)
+    parser.add_argument('--uni', help="Unigram weight. ", type=float, default=.5)
     parser.add_argument('--bi', help="Bigram weight. ", type=float, default=2.)
-    parser.add_argument('--ne', help="Named entity overlap weight ", type=float, default=2.)
-    parser.add_argument('--position', help="Position weight. ", type=float, default=-.5)
-    parser.add_argument('--thresh', help="Threshold for a sentence being considered", type=float, default=5.)
+    parser.add_argument('--ne', help="Named entity overlap weight ", type=float, default=3.)
+    parser.add_argument('--position', help="Position weight. ", type=float, default=-1.)
+    parser.add_argument('--thresh', help="Threshold for a sentence being considered", type=float, default=10.)
     args = parser.parse_args(arguments)
     prune(args)
 
