@@ -105,19 +105,19 @@ def get_data(args):
                     word_indexer.vocab[word] += 1                                        
                 #src_indexer.vocab[sent] += 1
                 
-        return max_word_l, num_sents
+        return max_sent_l, num_docs
                 
     def convert(srcfile, targetfile, batchsize, seqlength, outfile, num_docs,
                 max_sent_l, max_doc_l=0, unkfilter=0):
         
         newseqlength = seqlength + 2 #add 2 for EOS and BOS; TODO wasn't this already accounted for?
-        #targets = np.zeros((num_sents, newseqlength), dtype=int) # TODO rename this block
-        #target_output = np.zeros((num_sents, newseqlength), dtype=int)
+        targets = np.zeros((num_sents, newseqlength), dtype=int) 
+        target_output = np.zeros((num_sents, newseqlength), dtype=int)
         #sources = np.zeros((num_sents, newseqlength), dtype=int)
         source_lengths = np.zeros((num_docs,), dtype=int)
         target_lengths = np.zeros((num_docs,), dtype=int)
         sources_word = np.zeros((num_docs, newseqlength, max_sent_l), dtype=int)
-        targets_word = np.zeros((num_docs, newseqlength, max_sent_l), dtype=int)
+        #targets_word = np.zeros((num_docs, newseqlength, max_sent_l), dtype=int)
         dropped = 0
         doc_id = 0
         for _, (src_orig, targ_orig) in \

@@ -20,7 +20,6 @@ def format(path, outfile, split=.8):
     split_point = split*float(len(files))
     src_file = open(outfile+"-src-train.txt", "w+")
     targ_file = open(outfile+"-targ-train.txt", "w+")
-    val_flag = 0
     for f in files:
         with open(f, "r") as fh:
             sent = ""
@@ -29,24 +28,23 @@ def format(path, outfile, split=.8):
                 if row == "\n": # skip blank lines
                     continue
                 if row == "@highlight\n" and not targ_flag: # on first instance of @highlight, write to src
-                    print >> src_file, sent + "\n"
+                    print >> src_file, sent
                     sent = ""
                     targ_flag = 1
                 elif row == "@highlight\n": # else also skip @highlight
                     continue
                 else:
                     sent = sent + " </s> " + row.rstrip()
-        print >> targ_file, sent + "\n"
+        print >> targ_file, sent
         counter += 1
         if not (counter % 10000) and counter > 0:
             print counter
-        if counter > split_point and not val_flag:
+        if counter > split_point:
             print("Creating validation set")
             src_file.close()
             targ_file.close()
             src_file = open(outfile+"-src-valid.txt", "w+")
             targ_file = open(outfile+"-targ-valid.txt", "w+")
-            val_flag = 1
 
 def main(arguments):
     parser = argparse.ArgumentParser(
