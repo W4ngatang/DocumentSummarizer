@@ -46,20 +46,51 @@ def format(path, outfile, split=.8):
             src_file = open(outfile+"-src-valid.txt", "w+")
             targ_file = open(outfile+"-targ-valid.txt", "w+")
 
+# For the Lapata small dataset
+def format2(args):
+    files = [args.srcdir+x for x in os.listdir(args.srcdir)]
+    files.sort()
+    if args.training:
+        idxfile = open(args.outfile+"-indices.txt", "w+")
+        outfile = open(args.outfile+"-src.txt", "w")
+    else:
+        outfile = open(args.outfile+"-targ.txt", "w")
+    for f in files:
+        with open(f, "r") as fh:
+            doc = ""
+            indices = []
+            for row in fh:
+                if row == "\n":
+                    continue
+                if args.training:
+                    indices.append(row[0])
+                    doc = doc + " </s> " + row[1:].rstrip()
+                else:
+                    doc = doc + " </s> " + row.rstrip()
+        if args.training:
+            print >> idxfile, ', '.join(indices)
+        print >> outfile, doc
+                
+
 def main(arguments):
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--srcdir', help="Path to source training data, "
-                                           "where each line represents a single "
-                                           "source/target sequence.", type=str)
+    parser.add_argument('--training', help="1 if training", type=int, default=0)
+    parser.add_argument('--srcdir', help="Path to source training data. ", type=str)
     parser.add_argument('--outfile', help="Prefix of the output file names. ", type=str)
     parser.add_argument('--split', help="Fraction of the data in train/valid. ", type=float, default=.8)
+    parser.add_argument('--format', help="Format to use", type=int, default=1)
     args = parser.parse_args(arguments)
-    src_dir = args.srcdir
-    outfile = args.outfile
-    split = args.split
-    format(src_dir, outfile, split)
+    if args.format == 1:
+        src_dir = args.srcdir
+        outfile = args.outfile
+        split = args.split
+        format(src_dir, outfile, split)
+    elif args.format == 2:
+        format2(args)
+    else:
+        print "Oopsie."
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))

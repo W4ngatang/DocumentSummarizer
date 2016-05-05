@@ -14,6 +14,9 @@ import itertools
 import pdb
 import nltk
 import re
+from sklearn.linear_model import SGDClassifier
+import pickle
+#from build import featurize
 from collections import defaultdict
 
 def entity_overlap(src, targ):
@@ -27,8 +30,8 @@ def entity_overlap(src, targ):
                     entities.extend(entitify(child))
         return set(entities)
 
-    def get_entities(doc):
-        sentences = nltk.sent_tokenize(doc) # some nltk preprocessing: tokenize, tag, chunk, NER
+    def get_entities(sentences):
+        #sentences = nltk.sent_tokenize(doc) # some nltk preprocessing: tokenize, tag, chunk, NER
         tokenized_sentences = [nltk.word_tokenize(sentence) for sentence in sentences]
         tagged_sentences = [nltk.pos_tag(sentence) for sentence in tokenized_sentences]
         chunked_sentences = nltk.batch_ne_chunk(tagged_sentences, binary=True)
@@ -52,7 +55,6 @@ def entity_overlap(src, targ):
         num_entities.append(float(len(src_entity & targ_entity)))
     
     return num_entities
-        
 
 def clean_string(string): # some Yoon Kim magic
     string = re.sub(r"[^A-Za-z0-9(),!?\'\`]", " ", string)     
@@ -71,7 +73,7 @@ def clean_string(string): # some Yoon Kim magic
     return string.strip().lower()
     
 # for a doc and a summary, return binary array where 1 if sentence should be kept
-def featurize(source, targ, weights, thresh):
+def featurize(source, targ):
 
     # get unigram and bigram features
     def gram_feats(src, targ):
@@ -90,64 +92,111 @@ def featurize(source, targ, weights, thresh):
         bi = len(set(src_bi) & set(targ_bi))
         return float(uni), float(bi)
 
-    num_entities = entity_overlap(source.replace("</s>", ""), targ.replace("</s>", "")) # get #entity overlap per sentence
-    sentences = [clean_string(s) for s in source.strip().split("</s>")]
-    indicators = []
-    if len(num_entities) != len(sentences[1:]):
-        return [0] # when NLTK messes up
+    #num_entities = entity_overlap(source.split("</s>"), targ.split("</s>")) # get #entity overlap per sentence
+    sentences = [clean_string(s) for s in source.split("</s>")]
+    features = []
+    #if len(num_entities) != len(sentences):
+    #    return [0] # when NLTK messes up
     for i, sentence in enumerate(sentences[1:]): # artifact of split having leading ''
         uni, bi = gram_feats(sentence, targ) # below, take dot product of weights and features
         try:
-            score = sum([feat*weight for feat,weight in zip([uni, bi, float(i+1), num_entities[i]], weights)])
+            features.append([uni, bi, float(i+1)])#, num_entities[i]])
         except:
             pdb.set_trace()
-            print sentence
-        indicators.append(source > thresh)
 
-    return indicators
+    return features
+
+# Tune the classifier
+def tune(args):
+    s = open(args.train, 'r')
+    t = open(args.train_t, 'r')
+    ind = open(args.train_i, 'r')
+    srcs = s.read().split('\n')[:-1]
+    targs = t.read().split('\n')[:-1]
+    indices = ind.read().split('\n') # make sure formatted correctly`
+    indices = [[int(x) for x in row.split(', ')] for row in indices[:-1]] # magic number due to split()
+    X = []
+    y = []
+
+    for i in xrange(len(srcs)):
+        X += featurize(srcs[i], targs[i])
+        for j in xrange(len(indices[i])):
+            try:
+                if indices[i][j] == 2:
+                    y.append(1) # maybe should do a 0??
+                elif indices[i][j] == 3:
+                    y.append(0)
+                else:
+                    y.append(1)
+            except:
+                pdb.set_trace()
+        if not (i % 50):
+            print "Featurized %d" % i
+
+    model = SGDClassifier(loss=args.loss, penalty="l2")
+    model.fit(X,y)
+    return model, X, y
 
 # note: kind of specific to CNN+Dailymail
-def prune(args):
+def get_data(args):
     sources = open(args.srcfile, 'r')
     targets = open(args.targfile, 'r')
-    src_out = open(args.outfile+"-src.txt", 'w')
-    targ_out = open(args.outfile+"-targ.txt", 'w')
-    sources_all = sources.read().split("\n")
-    targets_all = targets.read().split("\n")
-    weights = [args.uni, args.bi, args.position, args.ne]
-    thresh = args.thresh
-
-    rejected = 0 # logging purposes
-    sub3 = 0
+    sources_all = sources.read().split("\n")[:-1]
+    targets_all = targets.read().split("\n")[:-1]
+    features = []
     for i in xrange(len(sources_all)):
-        indicators = featurize(sources_all[i], targets_all[i], weights, thresh)
-        if sum(indicators):
-            print >> src_out, sources_all[i]
-            print >> targ_out, indicators
-            if sum(indicators) < 3:
-                sub3 += 1
-        else:
-            rejected += 1
-        if not (i % 100):
-            print "Finished: %d, rejected: %d, sub 3: %d" % (i, rejected, sub3)
+        features.append(featurize(sources_all[i], targets_all[i])) # append here because we will predict for each sentence at a time
+        if not (i % 10000) and i:
+            print "Featurized %d" % i
+    return features
 
+def prune(args, model, data):
+    srcfile = open(args.outfile+'-src.txt', 'w+')
+    targfile = open(args.outfile+'-targ.txt', 'w+')
+    docfile = open(args.srcfile, 'r')
+    documents = docfile.read().split("\n")
+    for i in xrange(len(data)):
+        try:
+            if not data[i]:
+                continue
+            predictions = model.predict(data[i])
+            if sum(predictions) > args.thresh: # if there is a nonzero entry, i.e. a sentence that works as the summary
+                print >> srcfile, documents[i]
+                print >> targfile, predictions
+            if not (i % 10000):
+                print "Pruned %d" % i
+        except:
+            pdb.set_trace()
+        
 def main(arguments):
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('srcfile', help="Path to source training data, "
-                                           "where each line represents a single "
-                                           "source/target sequence.", type=str)
-    parser.add_argument('targfile', help="Path to target training data. ", type = str)
+    parser.add_argument('--srcfile', help="Path to source training data. ", type = str, default="data/cnn-src.txt")
+    parser.add_argument('--targfile', help="Path to target training data. ", type = str, default="data/cnn-targ.txt")
+    parser.add_argument('--pickle', help="Load from pickle or no", type =int, default=1)
+    parser.add_argument('--pickle_file', help="Path to pretrained pickle file to read or write. ", type = str, default='cnn.pkl')
+    parser.add_argument('--thresh', help="Threshold for number of overlap sentences to be accepted. ", type=int, default=0)
     parser.add_argument('--outfile', help="Prefix of the output file names. ", type=str, default="extract")
     parser.add_argument('--split', help="Fraction of the data in train/valid. ", type=float, default=.8)
-    parser.add_argument('--uni', help="Unigram weight. ", type=float, default=1.)
-    parser.add_argument('--bi', help="Bigram weight. ", type=float, default=2.)
-    parser.add_argument('--ne', help="Named entity overlap weight ", type=float, default=2.)
-    parser.add_argument('--position', help="Position weight. ", type=float, default=-.5)
-    parser.add_argument('--thresh', help="Threshold for a sentence being considered", type=float, default=5.)
+    parser.add_argument('--loss', help="Type of loss to use for classifier. ", type=str, default="hinge")
+    parser.add_argument('--train', help="Path to classifier training docs. ", type=str, default="valid-src.txt")
+    parser.add_argument('--train_t', help="Path to classifier training summaries. ", type=str, default="valid-targ.txt")
+    parser.add_argument('--train_i', help="Path to classifier training classes. ", type=str, default="valid-indices.txt")
     args = parser.parse_args(arguments)
-    prune(args)
+    if args.pickle:
+        pickle_dump = pickle.load(open(args.pickle_file, 'rb'))
+        model = pickle_dump[0]
+        data = pickle_dump[1]
+        print "Loaded data from pickle"
+    else:
+        print "Training model..."
+        model, train, train_t = tune(args)
+        print "Gathering data..."
+        data = get_data(args)
+        pickle.dump([model, data, train, train_t], open(args.pickle_file, 'wb'))
+    print "Pruning dataset..."
+    prune(args, model, data)
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))
