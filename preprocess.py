@@ -117,6 +117,7 @@ def get_data(args):
                 continue                   
             targ = pad(targ, newseqlength+1, 0)#target_indexer.PAD) # just pad with 0s
             targ = np.array(targ, dtype=int)
+            targ += 1
 
             src = pad(src, newseqlength, src_indexer.PAD)
             src_word = []
@@ -286,10 +287,6 @@ def main(arguments):
     parser.add_argument('--maxwordlength', help="For the character models, words are "
                                            "(if longer than maxwordlength) or zero-padded "
                                             "(if shorter) to maxwordlength", type=int, default=35)
-    parser.add_argument('--chars', help="If 1, construct the character-level dataset as well. "
-                                        "This might take up a lot of space depending on your data "
-                                        "size, so you may want to break up the training data into "
-                                        "different shards.", type=int, default=0)
     parser.add_argument('--srcvocabfile', help="If working with a preset vocab, "
                                           "then including this will ignore srcvocabsize and use the"
                                           "vocab provided here.",
