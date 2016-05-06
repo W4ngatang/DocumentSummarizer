@@ -60,9 +60,9 @@ cmd:text("Below options only apply if using the character model.")
 cmd:text("")
 
 -- char-cnn model specs (if use_chars == 1)
-cmd:option('-kernel_width', 6, [[Size (i.e. width) of the convolutional filter]])
+cmd:option('-kernel_width', 3, [[Size (i.e. width) of the convolutional filter]])
 -- TODO: may be a problem with num_kernel usage as size of some layers. check this
-cmd:option('-num_kernels', 1000, [[Number of convolutional filters (feature maps). So the
+cmd:option('-num_kernels', 100, [[Number of convolutional filters (feature maps). So the
 representation from characters will have this many dimensions]])
 cmd:option('-num_highway_layers', 0, [[Number of highway layers in the character model]]) -- set 0 for now
 
@@ -102,13 +102,13 @@ cmd:text("")
 cmd:option('-start_symbol', 0, [[Use special start-of-sentence and end-of-sentence tokens
 on the source side. We've found this to make minimal difference]])
 -- GPU
-cmd:option('-gpuid', -1, [[Which gpu to use. -1 = use CPU]])
+cmd:option('-gpuid', 1, [[Which gpu to use. -1 = use CPU]]) -- default 1 Jeffrey
 cmd:option('-gpuid2', -1, [[If this is >= 0, then the model will use two GPUs whereby the encoder
 is on the first GPU and the decoder is on the second GPU. 
 This will allow you to train with bigger batches/models.]])
-cmd:option('-cudnn', 0, [[Whether to use cudnn or not for convolutions (for the character model).
+cmd:option('-cudnn', 1, [[Whether to use cudnn or not for convolutions (for the character model).
 cudnn has much faster convolutions so this is highly recommended 
-if using the character model]])
+if using the character model]]) -- default 1 Jeffrey
 -- bookkeeping
 cmd:option('-save_every', 1, [[Save every this many epochs]])
 cmd:option('-print_every', 50, [[Print stats after this many batches]])

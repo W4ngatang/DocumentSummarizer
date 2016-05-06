@@ -13,7 +13,7 @@ function make_sent_conv(data, opt)
   local input_size = opt.num_kernels
 
   local input = nn.Identity()()
-  local word_vecs = nn.LookupTable(data.source_size, opt.word_vec_size)
+  local word_vecs = nn.LookupTable(data.char_size, opt.word_vec_size)
   word_vecs.name = 'word_vecs'
   local wordcnn = make_cnn(opt.word_vec_size,  opt.kernel_width, opt.num_kernels)
   wordcnn.name = 'wordcnn'
