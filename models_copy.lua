@@ -9,29 +9,37 @@ function nn.Module:setReuse()
    end
 end
 
+function make_sent_conv(data, opt, name)
+  local input_size = opt.word_vec_size
+
+  local input = nn.Identity()()
+  local word_vecs = nn.LookupTable(data.source_size, input_size)
+  word_vecs.name = 'word_vecs'
+  local wordcnn = make_cnn(data.source_size,  opt.kernel_width, opt.num_kernels)
+  wordcnn.name = 'wordcnn' .. name
+  x = wordcnn(word_vecs(input))
+  if opt.num_highway_layers > 0 then
+    local mlp = make_highway(input_size, opt.num_highway_layers)
+    mlp.name = 'mlp' .. name
+    x = mlp(x)
+  end
+  return nn.gModule({input}, {x})
+end
+
 -- Encoder: sentence LSTM
--- Decoder: sentence LSTM with previous encoded state attention
+-- Decoder: sentence LSTM with encoded state h_t
 function make_lstm(data, opt, model)
    assert(model == 'enc' or model == 'dec')
    local name = '_' .. model
    local dropout = opt.dropout or 0
    local n = opt.num_layers
    local rnn_size = opt.rnn_size
-   local input_size
-   if model == 'enc' then
-     input_size = opt.word_vec_size -- size after word embeddings
-   else
-     input_size = opt.num_kernels
-   end
+   local input_size = opt.word_vec_size -- size after word embeddings
 
    local offset = 0
    local inputs = {}
-   if model == 'enc' then
-      -- encoder input, original words
-      table.insert(inputs, nn.Identity()()) -- x (batch_size x max_word_l)
-   else
-      -- decoder input, document already encoded
-      table.insert(inputs, nn.Identity()()) -- source sentence encoding s_t (batch_size x filter_size)
+   table.insert(inputs, nn.Identity()()) -- x (batch_size x max_word_l)
+   if model == 'dec' then
       -- TODO: this needs to be bidirectional
       table.insert(inputs, nn.Identity()()) -- source context h_t (batch_size x rnn_size)
       table.insert(inputs, nn.Identity()()) -- previous prob p_{t-1} (batch_size x 1)
@@ -53,21 +61,13 @@ function make_lstm(data, opt, model)
      if L == 1 then
        if model == 'enc' then
          -- encoder
-         local word_vecs = nn.LookupTable(data.source_size, input_size)
-         word_vecs.name = 'word_vecs' .. name
-         local wordcnn = make_cnn(data.source_size,  opt.kernel_width, opt.num_kernels)
-         wordcnn.name = 'wordcnn' .. name
-         x = wordcnn(word_vecs(inputs[1]))
-         if opt.num_highway_layers > 0 then
-           local mlp = make_highway(input_size, opt.num_highway_layers)
-           mlp.name = 'mlp' .. name
-           x = mlp(x)
-         end
+         x = inputs[1]
          input_size_L = input_size
-         enc_sent = x -- output encoded sentence
        else
          -- decoder
-         x = inputs[1] -- encoded sentence
+         x = inputs[1]
+         local prob = nn.Sum(3)(nn.Replicate(rnn_size,2)(inputs[offset+1])) -- batch_size x rnn_size, should double check that sum is needed
+         x = nn.CMulTable()({prob, x})
          input_size_L = input_size
        end
      else
