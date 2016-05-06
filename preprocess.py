@@ -79,22 +79,12 @@ def get_data(args):
         for _, (src_orig, targ_orig) in \
                 enumerate(itertools.izip(open(srcfile,'r'), open(targetfile,'r'))):
             src_orig = src_indexer.clean(src_orig.decode("utf-8").strip())
-            targ_orig = target_indexer.clean(targ_orig.decode("utf-8").strip())
-            targ = targ_orig.strip().split("</s>")    # should split on sentence divider
             src = src_orig.strip().split("</s>")      # same here
-            if len(targ) > seqlength or len(src) > seqlength or len(targ) < 1 or len(src) < 1:
+            if len(src) > seqlength or len(src) < 1:
                 continue
             num_docs += 1
-            for sent in targ:
-                sent = word_indexer.clean(sent)
-                if len(sent) == 0:
-                    continue
-                max_sent_l = max(len(sent)+2, max_sent_l)
-                words = sent.split()
-                for word in words:
-                    word_indexer.vocab[word] += 1                                        
-                #target_indexer.vocab[sent] += 1
-                
+
+            # only words are in source; target is now binary
             for sent in src:
                 sent = word_indexer.clean(sent)
                 if len(sent) == 0:
@@ -110,14 +100,14 @@ def get_data(args):
     def convert(srcfile, targetfile, batchsize, seqlength, outfile, num_docs,
                 max_sent_l, max_doc_l=0, unkfilter=0):
         
-        newseqlength = seqlength + 2 #add 2 for EOS and BOS; TODO wasn't this already accounted for?
-        targets = np.zeros((num_sents, newseqlength), dtype=int) 
-        target_output = np.zeros((num_sents, newseqlength), dtype=int)
-        #sources = np.zeros((num_sents, newseqlength), dtype=int)
-        source_lengths = np.zeros((num_docs,), dtype=int)
-        target_lengths = np.zeros((num_docs,), dtype=int)
-        sources_word = np.zeros((num_docs, newseqlength, max_sent_l), dtype=int)
-        #targets_word = np.zeros((num_docs, newseqlength, max_sent_l), dtype=int)
+        newseqlength = seqlength + 2 #add 2 for EOS and BOS; length (in sentences) of the longest document
+        targets = np.zeros((num_docs, newseqlength), dtype=int) # the target sequence, used as inputs into the next prediction
+        target_output = np.zeros((num_docs, newseqlength), dtype=int) # the actual next word you want to be predicting
+        sources = np.zeros((num_sents, newseqlength), dtype=int) # input not split into words
+        source_lengths = np.zeros((num_docs,), dtype=int) # lengths of each document
+        target_lengths = np.zeros((num_docs,), dtype=int) # lengths of each target sequence
+        sources_word = np.zeros((num_docs, newseqlength, max_sent_l), dtype=int) # input where each sentence is split into words
+        targets_word = np.zeros((num_docs, newseqlength, max_sent_l), dtype=int) # output where each sentence is split into words
         dropped = 0
         doc_id = 0
         for _, (src_orig, targ_orig) in \
@@ -159,25 +149,21 @@ def get_data(args):
             #src = np.array(src, dtype=int)
             
             # TODO unknown filtering for targ/src_word?
-            '''
             if unkfilter > 0:
-                targ_unks = float((targ[:-1] == 2).sum())
-                src_unks = float((src == 2).sum())                
+                src_unks = float((src == 2).sum()) # TODO SHOULD RUN FILTER ON src_words                
                 if unkfilter < 1: #unkfilter is a percentage if < 1
-                    targ_unks = targ_unks/(len(targ[:-1])-2)
                     src_unks = src_unks/(len(src)-2)
-                if targ_unks > unkfilter or src_unks > unkfilter:
+                if src_unks > unkfilter:
                     dropped += 1
                     continue
-            '''
                 
-            # targ has been padded to len seqlen+1
-            #targets[doc_id] = np.array(targ[:-1],dtype=int) # get all but the last pad
-            #target_lengths[doc_id] = (targets[doc_id] != 1).sum() # get the length of the sequence (w/o pad)
-            targets_word[doc_id] = np.array(targ_word[:-1], dtype=int)
-            #target_output[doc_id] = np.array(targ[1:],dtype=int)                    
-            #sources[sent_id] = np.array(src, dtype=int)
-            #source_lengths[doc_id] = (sources[doc_id] != 1).sum()            
+            # targ has been padded to len seqlen+1; WILL NEED TO FIND SOME OTHER WAY TO PAD
+            targets[doc_id] = np.array(targ[:-1],dtype=int) # get all but the last pad
+            target_lengths[doc_id] = (targets[doc_id] != 1).sum() #  LENGTH OF THE SEQUENCE SHOULD BE LENGTH OF CORRESPONDING SENTENCE
+            #targets_word[doc_id] = np.array(targ_word[:-1], dtype=int)
+            target_output[doc_id] = np.array(targ[1:],dtype=int)                    
+            sources[sent_id] = np.array(src, dtype=int)
+            source_lengths[doc_id] = (sources[doc_id] != 1).sum()            
             source_word[doc_id] = np.array(src_word, dtype=int)
 
             doc_id += 1
@@ -186,40 +172,41 @@ def get_data(args):
 
         print(doc_id, num_docs)
         #break up batches based on source lengths
+        # get source_lengths into a particular shape then sort by length
         source_lengths = source_lengths[:sent_id]
         source_sort = np.argsort(source_lengths) 
-
         sources = sources[source_sort]
         targets = targets[source_sort]
         target_output = target_output[source_sort]
-        target_l = target_lengths[source_sort]
+        target_l = target_lengths[source_sort] # define new arrays to be the lengths
         source_l = source_lengths[source_sort]
 
         curr_l = 0
         l_location = [] #idx where sent length changes
         
-        for j,i in enumerate(source_sort):
+        for j,i in enumerate(source_sort): # iterate over the indices of the sorted sentences
             if source_lengths[i] > curr_l:
                 curr_l = source_lengths[i]
                 l_location.append(j+1)
-        l_location.append(len(sources))
+        l_location.append(len(sources)) # l_location is array where array sentence length changes happen
 
         #get batch sizes
         curr_idx = 1
         batch_idx = [1]
-        nonzeros = []
-        batch_l = []
-        batch_w = []
+        nonzeros = [] # number of nonzero entries 
+        batch_l = [] # batch lengths (number of sentences in the batch)
+        batch_w = [] # batch widths (length of the sentences in the batch)
         target_l_max = []
-        for i in range(len(l_location)-1):
+        for i in range(len(l_location)-1): # iterate over all the different document lengths
             while curr_idx < l_location[i+1]:
                 curr_idx = min(curr_idx + batchsize, l_location[i+1])
                 batch_idx.append(curr_idx)
-        for i in range(len(batch_idx)-1):
+        for i in range(len(batch_idx)-1): # iterate over batch_idx
             batch_l.append(batch_idx[i+1] - batch_idx[i])            
             batch_w.append(source_l[batch_idx[i]-1])
             nonzeros.append((target_output[batch_idx[i]-1:batch_idx[i+1]-1] != 1).sum().sum())
             target_l_max.append(max(target_l[batch_idx[i]-1:batch_idx[i+1]-1]))
+        # NOTE: actual batching is done in data.lua
 
         # Write output
         f = h5py.File(outfile, "w")
