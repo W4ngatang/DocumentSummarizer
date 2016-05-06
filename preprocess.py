@@ -72,7 +72,6 @@ def get_data(args):
     src_indexer = Indexer(["<blank>","<unk>","<d>","</d>"])
     word_indexer = Indexer(["<blank>","<unk>","<s>", "</s>"])
     word_indexer.add_w([src_indexer.PAD, src_indexer.UNK, src_indexer.BOD, src_indexer.EOD])
-    
     def make_vocab(srcfile, targetfile, seqlength, max_sent_l=0):
         num_docs = 0
         for _, (src_orig, targ_orig) in \
@@ -149,7 +148,6 @@ def get_data(args):
             sources[doc_id] = np.array(src, dtype=int)
             source_lengths[doc_id] = (sources[doc_id] == 1).sum()            
             sources_word[doc_id] = np.array(src_word, dtype=int)
-
             doc_id += 1
             if not (doc_id % 100000):
                 print("{}/{} sentences processed".format(doc_id, num_docs))
@@ -174,7 +172,7 @@ def get_data(args):
                 l_location.append(j+1)
         l_location.append(len(sources)) # l_location is array where array sentence length changes happen
 
-        # get batch sizes
+        #get batch sizes
         curr_idx = 1
         batch_idx = [1]
         nonzeros = [] # number of nonzero entries 

@@ -191,7 +191,6 @@ def prune(args, model, data):
             print "Fukin shit"
             pdb.set_trace()
 
-        
 def main(arguments):
     parser = argparse.ArgumentParser(
         description=__doc__,
