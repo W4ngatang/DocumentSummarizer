@@ -151,22 +151,46 @@ def get_data(args):
     return features
 
 def prune(args, model, data):
+    split = args.split
+    val_flag = 0
     srcfile = open(args.outfile+'-src.txt', 'w+')
     targfile = open(args.outfile+'-targ.txt', 'w+')
     docfile = open(args.srcfile, 'r')
-    documents = docfile.read().split("\n")
+    documents = docfile.read().split("\n")[:-1]
+    accepted = []
+    accepted_t = []
+    ndocs = 0.
     for i in xrange(len(data)):
         try:
             if not data[i]:
                 continue
             predictions = model.predict(data[i])
-            if sum(predictions) > args.thresh: # if there is a nonzero entry, i.e. a sentence that works as the summary
-                print >> srcfile, documents[i]
-                print >> targfile, predictions
+            if sum(predictions) > args.thresh: # if there is a nonzero entry
+                accepted.append(documents[i])
+                accepted_t.append(predictions)
+                ndocs += 1
             if not (i % 10000):
                 print "Pruned %d" % i
-        except:
+        except Exception as e:
+            print "There was an error"
             pdb.set_trace()
+
+    print "Writing training data..."
+    for i,(doc,seq) in enumerate(zip(accepted, accepted_t)):
+        try:
+            srcfile.write(doc+'\n')
+            targfile.write(np.array_str(seq, 1000)[1:-1]+'\n') # fkin numpy and their max line widths
+            if i > split*ndocs and not val_flag:
+                print "Writing validation data..."
+                srcfile.close()
+                targfile.close()
+                srcfile = open(args.outfile+'-valid-src.txt', 'w+')
+                targfile = open(args.outfile+'-valid-targ.txt', 'w+')
+                val_flag = 1
+        except Exception as e:
+            print "Fukin shit"
+            pdb.set_trace()
+
         
 def main(arguments):
     parser = argparse.ArgumentParser(
