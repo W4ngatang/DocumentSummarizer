@@ -143,7 +143,6 @@ def get_data(args):
                     continue
             '''
                 
-            pdb.set_trace()
             targets[doc_id] = np.array(targ[:-1],dtype=int) # get all but the last pad
             target_output[doc_id] = np.array(targ[1:],dtype=int)                    
             sources[doc_id] = np.array(src, dtype=int)
