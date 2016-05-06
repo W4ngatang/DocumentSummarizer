@@ -10,12 +10,12 @@ function nn.Module:setReuse()
 end
 
 function make_sent_conv(data, opt)
-  local input_size = opt.word_vec_size
+  local input_size = opt.num_kernels
 
   local input = nn.Identity()()
-  local word_vecs = nn.LookupTable(data.source_size, input_size)
+  local word_vecs = nn.LookupTable(data.source_size, opt.word_vec_size)
   word_vecs.name = 'word_vecs'
-  local wordcnn = make_cnn(data.source_size,  opt.kernel_width, opt.num_kernels)
+  local wordcnn = make_cnn(opt.word_vec_size,  opt.kernel_width, opt.num_kernels)
   wordcnn.name = 'wordcnn'
   x = wordcnn(word_vecs(input))
   if opt.num_highway_layers > 0 then
@@ -42,7 +42,7 @@ function make_lstm(data, opt, model)
    if model == 'dec' then
       -- TODO: this needs to be bidirectional
       table.insert(inputs, nn.Identity()()) -- source context h_t (batch_size x rnn_size)
-      table.insert(inputs, nn.Identity()()) -- previous prob p_{t-1} (batch_size x 1)
+      table.insert(inputs, nn.Identity()()) -- previous prob p_{t-1} (batch_size x 2)
       offset = offset + 2
    end   
    for L = 1,n do
@@ -66,7 +66,8 @@ function make_lstm(data, opt, model)
        else
          -- decoder
          x = inputs[1]
-         local prob = nn.Sum(3)(nn.Replicate(rnn_size,2)(inputs[offset+1])) -- batch_size x rnn_size, should double check that sum is needed
+         local prob = nn.Select(2,2)(inputs[offset+1]) -- batch_size x 1
+         prob = nn.Replicate(rnn_size,2)(prob) -- batch_size x rnn_size
          x = nn.CMulTable()({prob, x})
          input_size_L = input_size
        end
@@ -104,15 +105,12 @@ function make_lstm(data, opt, model)
     table.insert(outputs, next_h)
   end
 
-  if model == 'enc' then
-    table.insert(outputs, enc_sent) -- output encoded sentence
-  end
   if model == 'dec' then
     local top_h = outputs[#outputs]
     local term1 = nn.LinearNoBias(rnn_size, 2)(top_h)
     local term2 = nn.LinearNoBias(rnn_size, 2)(inputs[offset])
     local pred_prob = nn.LogSoftMax()(nn.CAddTable()({term1, term2}))
-    table.insert(outputs, pred_prob) -- p_t for sentence label
+    table.insert(outputs, pred_prob) -- p_t for sentence label, batch_l x 2
   end
   return nn.gModule(inputs, outputs)
 end
@@ -176,5 +174,3 @@ function make_highway(input_size, num_layers, output_size, bias, f)
     end
     return nn.gModule({start},{input})
 end
-
->>>>>>> 9a3bef5147248f28da986342b2cfaf5ef164813c

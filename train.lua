@@ -20,7 +20,7 @@ cmd:option('-data_file','data/demo-train.hdf5',[[Path to the training *.hdf5 fil
 from preprocess.py]])
 cmd:option('-val_data_file','data/demo-val.hdf5',[[Path to validation *.hdf5 file 
 from preprocess.py]])
-cmd:option('-savefile', 'seq2seq_lstm_attn', [[Savefile name (model will be saved as 
+cmd:option('-savefile', 'doc_summary', [[Savefile name (model will be saved as 
 savefile_epochX_PPL.t7 where X is the X-th epoch and PPL is 
 the validation perplexity]])
 cmd:option('-num_shards', 0, [[If the training data has been broken up into different shards, 
@@ -35,7 +35,7 @@ cmd:text("")
 
 cmd:option('-num_layers', 2, [[Number of layers in the LSTM encoder/decoder]])
 cmd:option('-rnn_size', 500, [[Size of LSTM hidden states]])
-cmd:option('-word_vec_size', 500, [[Word embedding sizes]])
+cmd:option('-word_vec_size', 300, [[Word embedding sizes]]) -- 300 for word2vec
 cmd:option('-use_chars_enc', 1, [[If 1, use character on the encoder 
 side (instead of word embeddings - this is now required for the document encoder]])
 cmd:option('-reverse_src', 0, [[If 1, reverse the source sequence. The original 
@@ -164,13 +164,13 @@ function train(train_data, valid_data)
       word_vecs_enc.weight[1]:copy(pre_word_vecs[i])
     end      
   end
-  if opt.pre_word_vecs_dec:len() > 0 then      
-    local f = hdf5.open(opt.pre_word_vecs_dec)     
-    local pre_word_vecs = f:read('word_vecs'):all()
-    for i = 1, pre_word_vecs:size(1) do
-      word_vecs_dec.weight[1]:copy(pre_word_vecs[i])
-    end      
-  end
+  --if opt.pre_word_vecs_dec:len() > 0 then      
+    --local f = hdf5.open(opt.pre_word_vecs_dec)     
+    --local pre_word_vecs = f:read('word_vecs'):all()
+    --for i = 1, pre_word_vecs:size(1) do
+      --word_vecs_dec.weight[1]:copy(pre_word_vecs[i])
+    --end      
+  --end
 
   print("Number of parameters: " .. num_params)
 
@@ -221,7 +221,7 @@ function train(train_data, valid_data)
       context_proto2 = context_proto2:cuda()	 
     else
       context_proto = context_proto:cuda()
-      sent_enc_proto = sent_enc_proto:cuda()
+      sent_enc_proto = sent_enc_proto:cuda() -- added by Jeffrey
       sent_enc_grad_proto = sent_enc_grad_proto:cuda()
       encoder_grad_proto = encoder_grad_proto:cuda()	 
     end
@@ -311,8 +311,10 @@ function train(train_data, valid_data)
       end
       local target, target_out, nonzeros, source = d[1], d[2], d[3], d[4]
       local batch_l, target_l, source_l = d[5], d[6], d[7]
-      local source_rev = d[8] -- for bidirectional
-      -- TODO: bidirectional - need to clone another encoder LSTM, and feed it source_rev
+      if opt.reverse_src == 1 then
+        local source_rev = d[8] -- for bidirectional
+        -- TODO: bidirectional - need to clone another encoder LSTM, and feed it source_rev
+      end
 
       local encoder_grads = encoder_grad_proto[{{1, batch_l}, {1, source_l}}]
       local sent_enc_grads = sent_enc_grad_proto[{{1, batch_l}, {1, source_l}}] -- added by Jeffrey
@@ -429,7 +431,7 @@ function train(train_data, valid_data)
 
       -- backprop sent_conv
       for t = source_l, 1, -1 do
-        sent_conv_model:forward(source[t]) -- inefficient, but needed if not cloning
+        sent_conv_model:forward(source[t]) -- inefficient, but needed if not cloning: TODO fix this
         local dl_ds = sent_enc_grads[{{},t}]
         sent_conv_model:backward(source[t], dl_ds)
       end
@@ -595,7 +597,6 @@ function get_layer(layer)
       word_vecs_enc = layer
     elseif layer.name == 'word_vecs' then
       -- we don't have decoder word vecs.
-      --word_vecs_dec = layer
       word_vecs_enc = layer
     elseif layer.name == 'decoder_attn' then	 
       decoder_attn = layer
@@ -681,8 +682,8 @@ function main()
   decoder:apply(get_layer)   
   sent_conv_model:apply(get_layer)
 
+  io.read()
   train(train_data, valid_data)
 end
 
 main()
->>>>>>> 9a3bef5147248f28da986342b2cfaf5ef164813c
