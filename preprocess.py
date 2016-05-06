@@ -146,8 +146,8 @@ def get_data(args):
             targets[doc_id] = np.array(targ[:-1],dtype=int) # get all but the last pad
             target_output[doc_id] = np.array(targ[1:],dtype=int)                    
             sources[doc_id] = np.array(src, dtype=int)
-            target_lengths[doc_id] = (sources[doc_id] == 1).sum() # LENGTH OF THE SEQUENCE SHOULD BE LENGTH OF CORRESPONDING SENTENCE
             source_lengths[doc_id] = (sources[doc_id] == 1).sum()            
+            target_lengths[doc_id] = source_lengths[doc_id]
             sources_word[doc_id] = np.array(src_word, dtype=int)
             doc_id += 1
             if not (doc_id % 100000):
@@ -196,8 +196,8 @@ def get_data(args):
         
         # NOTE: not changing the names of things so don't need to change data.lua
         f["source"] = sources # sources is now binary where 1 = not pad, 0 = pad
-        f["target"] = targets
-        f["target_output"] = target_output
+        f["target"] = target_output #used to be target
+        f["target_output"] = targets #target_output
         f["target_l"] = np.array(target_l_max, dtype=int)
         f["target_l_all"] = target_l        
         f["batch_l"] = np.array(batch_l, dtype=int)
