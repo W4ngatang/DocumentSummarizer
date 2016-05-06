@@ -34,7 +34,7 @@ function make_lstm(data, opt, model)
    local dropout = opt.dropout or 0
    local n = opt.num_layers
    local rnn_size = opt.rnn_size
-   local input_size = opt.word_vec_size -- size after word embeddings
+   local input_size = opt.num_kernels -- size after conv
 
    local offset = 0
    local inputs = {}
@@ -67,7 +67,7 @@ function make_lstm(data, opt, model)
          -- decoder
          x = inputs[1]
          local prob = nn.Select(2,2)(inputs[offset+1]) -- batch_size x 1
-         prob = nn.Replicate(rnn_size,2)(prob) -- batch_size x rnn_size
+         prob = nn.Replicate(input_size,2)(prob) -- batch_size x input_size
          x = nn.CMulTable()({prob, x})
          input_size_L = input_size
        end

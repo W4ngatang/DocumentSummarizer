@@ -33,7 +33,7 @@ cmd:text("")
 cmd:text("**Model options**")
 cmd:text("")
 
-cmd:option('-num_layers', 2, [[Number of layers in the LSTM encoder/decoder]])
+cmd:option('-num_layers', 1, [[Number of layers in the LSTM encoder/decoder]])
 cmd:option('-rnn_size', 500, [[Size of LSTM hidden states]])
 cmd:option('-word_vec_size', 300, [[Word embedding sizes]]) -- 300 for word2vec
 cmd:option('-use_chars_enc', 1, [[If 1, use character on the encoder 
@@ -207,10 +207,13 @@ function train(train_data, valid_data)
   end   
 
   local h_init_dec = torch.zeros(valid_data.batch_l:max(), opt.rnn_size)
+  local h_init_dec_prob = torch.zeros(valid_data.batch_l:max(), 2) -- prob p_t, added by Jeffrey
+  h_init_dec_prob[{{},2}]:fill(1) -- Jeffrey
   local h_init_enc = torch.zeros(valid_data.batch_l:max(), opt.rnn_size)      
   if opt.gpuid >= 0 then
     h_init_enc = h_init_enc:cuda()      
     h_init_dec = h_init_dec:cuda()
+    h_init_dec_prob = h_init_dec_prob:cuda()
     cutorch.setDevice(opt.gpuid)
     if opt.gpuid2 >= 0 then
       cutorch.setDevice(opt.gpuid)
@@ -229,8 +232,8 @@ function train(train_data, valid_data)
 
   init_fwd_enc = {}
   init_bwd_enc = {}
-  init_fwd_dec = {h_init_dec:clone()} -- initial context
-  init_bwd_dec = {h_init_dec:clone()} -- just need one copy of this
+  init_fwd_dec = {h_init_dec_prob:clone()} -- initial context
+  init_bwd_dec = {h_init_dec_prob:clone()} -- just need one copy of this
 
   for L = 1, opt.num_layers do
     table.insert(init_fwd_enc, h_init_enc:clone())
@@ -246,7 +249,9 @@ function train(train_data, valid_data)
   function reset_state(state, batch_l, t)
     local u = {[t] = {}}
     for i = 1, #state do
-      state[i]:zero()
+      if state[i]:size(2) ~= 2 then -- added by Jeffrey
+        state[i]:zero()
+      end
       table.insert(u[t], state[i][{{1, batch_l}}])
     end
     if t == 0 then
@@ -301,6 +306,7 @@ function train(train_data, valid_data)
     local num_words_source = 0
 
 
+    print("starting train")
     for i = 1, data:size() do
       zero_table(grad_params, 'zero')
       local d
@@ -326,15 +332,16 @@ function train(train_data, valid_data)
         cutorch.setDevice(opt.gpuid)
       end
 
+      print("forward encoder")
       -- forward prop encoder
       for t = 1, source_l do
         encoder_clones[t]:training()
         local s = sent_conv_model:forward(source[t]) -- create s_t once
-        sent_enc[{{},t}]:copy(s)
+        sent_enc[{{},t,{}}]:copy(s)
         local encoder_input = {s, table.unpack(rnn_state_enc[t-1])}
         local out = encoder_clones[t]:forward(encoder_input)
         rnn_state_enc[t] = out
-        context[{{},t}]:copy(out[#out])
+        context[{{},t,{}}]:copy(out[#out])
       end
 
       if opt.gpuid >= 0 and opt.gpuid2 >= 0 then
@@ -344,6 +351,7 @@ function train(train_data, valid_data)
         context = context2
       end
 
+      print("forward decoder")
       -- forward prop decoder
       local rnn_state_dec = reset_state(init_fwd_dec, batch_l, 0)
       if opt.init_dec == 1 then
@@ -357,7 +365,7 @@ function train(train_data, valid_data)
       local decoder_input
       for t = 1, target_l do
         decoder_clones[t]:training()
-        local decoder_input = {sent_enc[t], context[t], table.unpack(rnn_state_dec[t-1])}
+        local decoder_input = {sent_enc[{{},t,{}}], context[{{},t,{}}], table.unpack(rnn_state_dec[t-1])}
         local out = decoder_clones[t]:forward(decoder_input)
         local next_state = {}
         table.insert(preds, out[#out])
@@ -368,6 +376,7 @@ function train(train_data, valid_data)
         rnn_state_dec[t] = next_state
       end
 
+      print("backprop decoder")
       -- backward prop decoder
       encoder_grads:zero()	 
       sent_enc_grads:zero()
@@ -400,6 +409,7 @@ function train(train_data, valid_data)
       local grad_norm = 0
       grad_norm = grad_norm + grad_params[2]:norm()^2 + grad_params[3]:norm()^2
 
+      print("backprop encoder")
       -- backward prop encoder
       if opt.gpuid >= 0 and opt.gpuid2 >= 0 then
         cutorch.setDevice(opt.gpuid)
@@ -430,6 +440,7 @@ function train(train_data, valid_data)
       end
 
       -- backprop sent_conv
+      print("backprop sent conv")
       for t = source_l, 1, -1 do
         sent_conv_model:forward(source[t]) -- inefficient, but needed if not cloning: TODO fix this
         local dl_ds = sent_enc_grads[{{},t}]
@@ -682,7 +693,6 @@ function main()
   decoder:apply(get_layer)   
   sent_conv_model:apply(get_layer)
 
-  io.read()
   train(train_data, valid_data)
 end
 
