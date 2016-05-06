@@ -177,3 +177,4 @@ function make_highway(input_size, num_layers, output_size, bias, f)
     return nn.gModule({start},{input})
 end
 
+>>>>>>> 9a3bef5147248f28da986342b2cfaf5ef164813c
