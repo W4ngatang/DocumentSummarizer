@@ -143,10 +143,11 @@ def get_data(args):
                     continue
             '''
                 
+            pdb.set_trace()
             targets[doc_id] = np.array(targ[:-1],dtype=int) # get all but the last pad
-            target_lengths[doc_id] = (sources[doc_id] == 1).sum() # LENGTH OF THE SEQUENCE SHOULD BE LENGTH OF CORRESPONDING SENTENCE
             target_output[doc_id] = np.array(targ[1:],dtype=int)                    
             sources[doc_id] = np.array(src, dtype=int)
+            target_lengths[doc_id] = (sources[doc_id] == 1).sum() # LENGTH OF THE SEQUENCE SHOULD BE LENGTH OF CORRESPONDING SENTENCE
             source_lengths[doc_id] = (sources[doc_id] == 1).sum()            
             sources_word[doc_id] = np.array(src_word, dtype=int)
             doc_id += 1
