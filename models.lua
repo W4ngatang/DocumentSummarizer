@@ -9,85 +9,80 @@ function nn.Module:setReuse()
    end
 end
 
-function make_lstm(data, opt, model, use_chars)
+function make_sent_conv(data, opt)
+  local input_size = opt.word_vec_size
+
+  local input = nn.Identity()()
+  local word_vecs = nn.LookupTable(data.source_size, input_size)
+  word_vecs.name = 'word_vecs'
+  local wordcnn = make_cnn(data.source_size,  opt.kernel_width, opt.num_kernels)
+  wordcnn.name = 'wordcnn'
+  x = wordcnn(word_vecs(input))
+  if opt.num_highway_layers > 0 then
+    local mlp = make_highway(input_size, opt.num_highway_layers)
+    mlp.name = 'mlp'
+    x = mlp(x)
+  end
+  return nn.gModule({input}, {x})
+end
+
+-- Encoder: sentence LSTM
+-- Decoder: sentence LSTM with encoded state h_t
+function make_lstm(data, opt, model)
    assert(model == 'enc' or model == 'dec')
-   local name = '_' .. model
+   --local name = '_' .. model
    local dropout = opt.dropout or 0
    local n = opt.num_layers
    local rnn_size = opt.rnn_size
-   local input_size
-   if use_chars == 0 then
-      input_size = opt.word_vec_size
-   else
-      input_size = opt.num_kernels
-   end   
+   local input_size = opt.word_vec_size -- size after word embeddings
+
    local offset = 0
-  -- there will be 2*n+3 inputs
    local inputs = {}
    table.insert(inputs, nn.Identity()()) -- x (batch_size x max_word_l)
    if model == 'dec' then
-      table.insert(inputs, nn.Identity()()) -- all context (batch_size x source_l x rnn_size)
-      table.insert(inputs, nn.Identity()()) -- prev context_attn (batch_size x rnn_size)
+      -- TODO: this needs to be bidirectional
+      table.insert(inputs, nn.Identity()()) -- source context h_t (batch_size x rnn_size)
+      table.insert(inputs, nn.Identity()()) -- previous prob p_{t-1} (batch_size x 1)
       offset = offset + 2
    end   
-  for L = 1,n do
-    table.insert(inputs, nn.Identity()()) -- prev_c[L]
-    table.insert(inputs, nn.Identity()()) -- prev_h[L]
-  end
+   for L = 1,n do
+     table.insert(inputs, nn.Identity()()) -- prev_c[L]
+     table.insert(inputs, nn.Identity()()) -- prev_h[L]
+   end
 
-  local x, input_size_L
-  local outputs = {}
-  for L = 1,n do
+   local x, input_size_L
+   local enc_sent
+   local outputs = {}
+   for L = 1,n do
      -- c,h from previous timesteps
-    local prev_c = inputs[L*2+offset]    
-    local prev_h = inputs[L*2+1+offset]
-    -- the input to this layer
-    if L == 1 then
-       if use_chars == 0 then
-	  local word_vecs
-	  if model == 'enc' then
-	     word_vecs = nn.LookupTable(data.source_size, input_size)
-	  else
-	     word_vecs = nn.LookupTable(data.target_size, input_size)
-	  end	  
-	  word_vecs.name = 'word_vecs' .. name
-	  x = word_vecs(inputs[1]) -- batch_size x word_vec_size
+     local prev_c = inputs[L*2+offset]    
+     local prev_h = inputs[L*2+1+offset]
+     -- the input to this layer
+     if L == 1 then
+       if model == 'enc' then
+         -- encoder
+         x = inputs[1]
+         input_size_L = input_size
        else
-	  local char_vecs = nn.LookupTable(data.char_size, opt.char_vec_size)
-	  char_vecs.name = 'word_vecs' .. name
-	  local charcnn = make_cnn(opt.char_vec_size,  opt.kernel_width, opt.num_kernels)
-	  charcnn.name = 'charcnn' .. name
-	  x = charcnn(char_vecs(inputs[1]))
-	  if opt.num_highway_layers > 0 then
-	     local mlp = make_highway(input_size, opt.num_highway_layers)
-	     mlp.name = 'mlp' .. name
-	     x = mlp(x)
-	  end	  
+         -- decoder
+         x = inputs[1]
+         local prob = nn.Sum(3)(nn.Replicate(rnn_size,2)(inputs[offset+1])) -- batch_size x rnn_size, should double check that sum is needed
+         x = nn.CMulTable()({prob, x})
+         input_size_L = input_size
        end
-       input_size_L = input_size
-       if model == 'dec' then
-	  x = nn.JoinTable(2)({x, inputs[1+offset]}) -- batch_size x (word_vec_size + rnn_size)
-	  input_size_L = input_size + rnn_size
-       end
-    else
+     else
        x = outputs[(L-1)*2]
-       if opt.res_net == 1 and L > 2 then
-	  x = nn.CAddTable()({x, outputs[(L-2)*2]})       
-       end       
+       -- TODO: removed a res net
        input_size_L = rnn_size
-       if opt.hop_attn == L and model == 'dec' then
-	  local hop_attn = make_decoder_attn(data, opt, 1)
-	  hop_attn.name = 'hop_attn' .. L
-	  x = hop_attn({x, inputs[offset]})
-       end
+       -- TODO: removed a hop attn here, consider adding it
        if dropout > 0 then
-	  x = nn.Dropout(dropout, nil, true)(x)
-       end       
-    end
-    -- evaluate the input sums at once for efficiency
-    local i2h = nn.Linear(input_size_L, 4 * rnn_size):reuseMem()(x)
-    local h2h = nn.LinearNoBias(rnn_size, 4 * rnn_size):reuseMem()(prev_h)
-    local all_input_sums = nn.CAddTable()({i2h, h2h})
+         x = nn.Dropout(dropout, nil, true)(x)
+       end
+     end
+     -- evaluate the input sums at once for efficiency
+     local i2h = nn.Linear(input_size_L, 4 * rnn_size):reuseMem()(x)
+     local h2h = nn.LinearNoBias(rnn_size, 4 * rnn_size):reuseMem()(prev_h)
+     local all_input_sums = nn.CAddTable()({i2h, h2h})
 
     local reshaped = nn.Reshape(4, rnn_size)(all_input_sums)
     local n1, n2, n3, n4 = nn.SplitTable(2)(reshaped):split(4)
@@ -104,67 +99,30 @@ function make_lstm(data, opt, model, use_chars)
       })
     -- gated cells form the output
     local next_h = nn.CMulTable()({out_gate, nn.Tanh():reuseMem()(next_c)})
-    
+
     table.insert(outputs, next_c)
     table.insert(outputs, next_h)
   end
+
+  if model == 'enc' then
+    table.insert(outputs, enc_sent) -- output encoded sentence
+  end
   if model == 'dec' then
-     local top_h = outputs[#outputs]
-     local decoder_attn = make_decoder_attn(data, opt)     
-     decoder_attn.name = 'decoder_attn'
-     local attn_out = decoder_attn({top_h, inputs[offset]})
-     if dropout > 0 then
-	attn_out = nn.Dropout(dropout, nil, true)(attn_out)
-     end     
-     table.insert(outputs, attn_out)
+    local top_h = outputs[#outputs]
+    local term1 = nn.LinearNoBias(rnn_size, 2)(top_h)
+    local term2 = nn.LinearNoBias(rnn_size, 2)(inputs[offset])
+    local pred_prob = nn.LogSoftMax()(nn.CAddTable()({term1, term2}))
+    table.insert(outputs, pred_prob) -- p_t for sentence label
   end
   return nn.gModule(inputs, outputs)
 end
 
-function make_decoder_attn(data, opt, simple)
-   -- 2D tensor target_t (batch_l x rnn_size) and
-   -- 3D tensor for context (batch_l x source_l x rnn_size)
-
-   local inputs = {}
-   table.insert(inputs, nn.Identity()())
-   table.insert(inputs, nn.Identity()())
-   local target_t = nn.LinearNoBias(opt.rnn_size, opt.rnn_size)(inputs[1])
-   local context = inputs[2]
-   simple = simple or 0
-   -- get attention
-
-   local attn = nn.MM()({context, nn.Replicate(1,3)(target_t)}) -- batch_l x source_l x 1
-   attn = nn.Sum(3)(attn)
-   local softmax_attn = nn.SoftMax()
-   softmax_attn.name = 'softmax_attn'
-   attn = softmax_attn(attn)
-   attn = nn.Replicate(1,2)(attn) -- batch_l x  1 x source_l
-   
-   -- apply attention to context
-   local context_combined = nn.MM()({attn, context}) -- batch_l x 1 x rnn_size
-   context_combined = nn.Sum(2)(context_combined) -- batch_l x rnn_size
-   local context_output
-   if simple == 0 then
-      context_combined = nn.JoinTable(2)({context_combined, inputs[1]}) -- batch_l x rnn_size*2
-      context_output = nn.Tanh()(nn.LinearNoBias(opt.rnn_size*2,
-						 opt.rnn_size)(context_combined))
-   else
-      context_output = nn.CAddTable()({context_combined,inputs[1]})
-   end   
-   return nn.gModule(inputs, {context_output})   
-end
-
-function make_generator(data, opt)
-   local model = nn.Sequential()
-   model:add(nn.Linear(opt.rnn_size, data.target_size))
-   model:add(nn.LogSoftMax())
-   local w = torch.ones(data.target_size)
-   w[1] = 0
-   criterion = nn.ClassNLLCriterion(w)
+function make_criterion(opt)
+   local w = torch.ones(2)
+   criterion = nn.ClassNLLCriterion(w) -- TODO: ???
    criterion.sizeAverage = false
-   return model, criterion
+   return criterion
 end
-
 
 -- cnn Unit
 function make_cnn(input_size, kernel_width, num_kernels)
@@ -219,3 +177,4 @@ function make_highway(input_size, num_layers, output_size, bias, f)
     return nn.gModule({start},{input})
 end
 
+>>>>>>> 9a3bef5147248f28da986342b2cfaf5ef164813c
