@@ -41,7 +41,7 @@ side (instead of word embeddings - this is now required for the document encoder
 cmd:option('-reverse_src', 0, [[If 1, reverse the source sequence. The original 
 sequence-to-sequence paper found that this was crucial to 
 achieving good performance, but with attention models this
-does not seem necessary. Recommend leaving it to 0]])
+does not seem necessary. Recommend leaving it to 0]]) -- TODO: need bidirectional
 cmd:option('-init_dec', 1, [[Initialize the hidden/cell state of the decoder at time 
 0 to be the last hidden/cell state of the encoder. If 0, 
 the initial states of the decoder are set to zero vectors]])
@@ -61,9 +61,10 @@ cmd:text("")
 
 -- char-cnn model specs (if use_chars == 1)
 cmd:option('-kernel_width', 6, [[Size (i.e. width) of the convolutional filter]])
+-- TODO: may be a problem with num_kernel usage as size of some layers. check this
 cmd:option('-num_kernels', 1000, [[Number of convolutional filters (feature maps). So the
 representation from characters will have this many dimensions]])
-cmd:option('-num_highway_layers', 2, [[Number of highway layers in the character model]])
+cmd:option('-num_highway_layers', 0, [[Number of highway layers in the character model]]) -- set 0 for now
 
 cmd:text("")
 cmd:text("**Optimization options**")
@@ -83,16 +84,15 @@ cmd:option('-lr_decay', 0.5, [[Decay learning rate by this much if (i) perplexit
 on the validation set or (ii) epoch has gone past the start_decay_at_limit]])
 cmd:option('-start_decay_at', 9, [[Start decay after this epoch]])
 cmd:option('-curriculum', 0, [[For this many epochs, order the minibatches based on source
-sequence length. Sometimes setting this to 1 will increase convergence speed.]])
--- TODO: fix these
+sequence length. Sometimes setting this to 1 will increase convergence speed.]]) -- TODO: implement curriculum from their code
 cmd:option('-pre_word_vecs_enc', '', [[If a valid path is specified, then this will load 
 pretrained word embeddings (hdf5 file) on the encoder side. 
-See README for specific formatting instructions.]])
-cmd:option('-pre_word_vecs_dec', '', [[If a valid path is specified, then this will load 
-pretrained word embeddings (hdf5 file) on the decoder side. 
-See README for specific formatting instructions.]])
+See README for specific formatting instructions.]]) -- TODO: load with word2vec
+--cmd:option('-pre_word_vecs_dec', '', [[If a valid path is specified, then this will load 
+--pretrained word embeddings (hdf5 file) on the decoder side. 
+--See README for specific formatting instructions.]])
 cmd:option('-fix_word_vecs_enc', 0, [[If = 1, fix word embeddings on the encoder side]])
-cmd:option('-fix_word_vecs_dec', 0, [[If = 1, fix word embeddings on the decoder side]])
+--cmd:option('-fix_word_vecs_dec', 0, [[If = 1, fix word embeddings on the decoder side]])
 
 cmd:text("")
 cmd:text("**Other options**")
@@ -178,10 +178,10 @@ function train(train_data, valid_data)
     cutorch.setDevice(opt.gpuid)
     word_vecs_enc.weight[1]:zero()      
     cutorch.setDevice(opt.gpuid2)
-    word_vecs_dec.weight[1]:zero()
+    --word_vecs_dec.weight[1]:zero()
   else
     word_vecs_enc.weight[1]:zero()            
-    word_vecs_dec.weight[1]:zero()
+    --word_vecs_dec.weight[1]:zero()
   end         
 
   -- prototypes for gradients so there is no need to clone
@@ -311,9 +311,11 @@ function train(train_data, valid_data)
       end
       local target, target_out, nonzeros, source = d[1], d[2], d[3], d[4]
       local batch_l, target_l, source_l = d[5], d[6], d[7]
+      local source_rev = d[8] -- for bidirectional
+      -- TODO: bidirectional - need to clone another encoder LSTM, and feed it source_rev
 
       local encoder_grads = encoder_grad_proto[{{1, batch_l}, {1, source_l}}]
-      local sent_enc_grads = sent_enc_grads[{{1, batch_l}, {1, source_l}}] -- added by Jeffrey
+      local sent_enc_grads = sent_enc_grad_proto[{{1, batch_l}, {1, source_l}}] -- added by Jeffrey
 
       local rnn_state_enc = reset_state(init_fwd_enc, batch_l, 0)
       local context = context_proto[{{1, batch_l}, {1, source_l}}]
@@ -385,7 +387,7 @@ function train(train_data, valid_data)
           drnn_state_dec[j-3]:copy(dlst[j])
         end	    
 
-        -- accumulate for conv
+        -- accumulate for conv (Jeffrey)
         sent_enc_grads[{{},t}]:add(dlst[1])
       end
       --word_vecs_dec.gradWeight[1]:zero()
@@ -592,7 +594,8 @@ function get_layer(layer)
     elseif layer.name == 'word_vecs_enc' then
       word_vecs_enc = layer
     elseif layer.name == 'word_vecs' then
-      word_vecs_dec = layer
+      -- we don't have decoder word vecs.
+      --word_vecs_dec = layer
       word_vecs_enc = layer
     elseif layer.name == 'decoder_attn' then	 
       decoder_attn = layer

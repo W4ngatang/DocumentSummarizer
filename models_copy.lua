@@ -9,18 +9,18 @@ function nn.Module:setReuse()
    end
 end
 
-function make_sent_conv(data, opt, name)
+function make_sent_conv(data, opt)
   local input_size = opt.word_vec_size
 
   local input = nn.Identity()()
   local word_vecs = nn.LookupTable(data.source_size, input_size)
   word_vecs.name = 'word_vecs'
   local wordcnn = make_cnn(data.source_size,  opt.kernel_width, opt.num_kernels)
-  wordcnn.name = 'wordcnn' .. name
+  wordcnn.name = 'wordcnn'
   x = wordcnn(word_vecs(input))
   if opt.num_highway_layers > 0 then
     local mlp = make_highway(input_size, opt.num_highway_layers)
-    mlp.name = 'mlp' .. name
+    mlp.name = 'mlp'
     x = mlp(x)
   end
   return nn.gModule({input}, {x})
@@ -30,7 +30,7 @@ end
 -- Decoder: sentence LSTM with encoded state h_t
 function make_lstm(data, opt, model)
    assert(model == 'enc' or model == 'dec')
-   local name = '_' .. model
+   --local name = '_' .. model
    local dropout = opt.dropout or 0
    local n = opt.num_layers
    local rnn_size = opt.rnn_size
