@@ -108,9 +108,10 @@ def get_data(args):
         doc_id = 0
         for _, (src_orig, targ_orig) in \
                 enumerate(itertools.izip(open(srcfile,'r'), open(targetfile,'r'))):
-            src_orig = src_indexer.clean(src_orig.decode("utf-8").strip())
+            src_orig = src_indexer.clean(src_orig.decode("utf-8").strip()[1:])
             targ = [0] + targ_orig.strip().split() + [0] # targ and src should be same length
             src = [src_indexer.BOD] + src_orig.strip().split("</s>") + [src_indexer.EOD] # need to add EOD, BOD to word_indexer
+            pdb.set_trace()
             max_doc_l = max(len(targ), len(src), max_doc_l)
             if len(targ) > newseqlength or len(src) > newseqlength or len(targ) < 3 or len(src) < 3:
                 dropped += 1
@@ -193,7 +194,7 @@ def get_data(args):
 
         # Write output
         f = h5py.File(outfile, "w")
-        
+
         # NOTE: not changing the names of things so don't need to change data.lua
         f["source"] = sources # sources is now binary where 1 = not pad, 0 = pad
         f["target"] = target_output #used to be target
@@ -217,15 +218,15 @@ def get_data(args):
         return max_sent_l
 
     print("First pass through data to get vocab...")
-    max_word_l, num_sents_train = make_vocab(args.srcfile, args.targetfile,
+    max_sentence_l, num_docs_train = make_vocab(args.srcfile, args.targetfile,
                                              args.seqlength, 0)
-    print("Number of sentences in training: {}".format(num_sents_train))
-    max_word_l, num_sents_valid = make_vocab(args.srcvalfile, args.targetvalfile,
-                                             args.seqlength, max_word_l)
-    print("Number of sentences in valid: {}".format(num_sents_valid))    
-    print("Max word length (before cutting): {}".format(max_word_l))
-    max_word_l = min(max_word_l, args.maxwordlength)
-    print("Max word length (after cutting): {}".format(max_word_l))
+    print("Number of sentences in training: {}".format(num_docs_train))
+    max_sentence_l, num_docs_valid = make_vocab(args.srcvalfile, args.targetvalfile,
+                                             args.seqlength, max_sentence_l)
+    print("Number of doc in valid: {}".format(num_docs_valid))    
+    print("Max sentence length (before cutting): {}".format(max_sentence_l))
+    max_sent_l = min(max_sentence_l, args.maxsentlength)
+    print("Max sentence length (after cutting): {}".format(max_sent_l))
 
     #prune and write vocab
     src_indexer.prune_vocab(args.srcvocabsize)
@@ -243,20 +244,20 @@ def get_data(args):
     #target_indexer.write(args.outputfile + ".targ.dict")
     word_indexer.prune_vocab(args.srcvocabsize)
     word_indexer.write(args.outputfile + ".char.dict")
-    print("Character vocab size: {}".format(len(word_indexer.pruned_vocab)))
+    print("Word vocab size: {}".format(len(word_indexer.pruned_vocab)))
     
     print("Source vocab size: Original = {}, Pruned = {}".format(len(src_indexer.vocab), 
                                                           len(src_indexer.d)))
     #print("Target vocab size: Original = {}, Pruned = {}".format(len(target_indexer.vocab), 
     #                                                      len(target_indexer.d)))
 
-    max_sent_l = 0
-    max_sent_l = convert(args.srcvalfile, args.targetvalfile, args.batchsize, args.seqlength,
-                         args.outputfile + "-val.hdf5", num_sents_valid,
-                         max_word_l, max_sent_l, args.unkfilter)
-    max_sent_l = convert(args.srcfile, args.targetfile, args.batchsize, args.seqlength,
-                         args.outputfile + "-train.hdf5", num_sents_train, max_word_l,
-                         max_sent_l, args.unkfilter)
+    max_doc_l = 0
+    max_doc_l = convert(args.srcvalfile, args.targetvalfile, args.batchsize, args.seqlength,
+                         args.outputfile + "-val.hdf5", num_docs_valid,
+                         max_sent_l, max_doc_l, args.unkfilter)
+    max_doc_l = convert(args.srcfile, args.targetfile, args.batchsize, args.seqlength,
+                         args.outputfile + "-train.hdf5", num_docs_train, max_sent_l,
+                         max_doc_l, args.unkfilter)
     
     print("Max sent length (before dropping): {}".format(max_sent_l))    
     
@@ -284,7 +285,7 @@ def main(arguments):
     parser.add_argument('--seqlength', help="Maximum sequence length. Sequences longer "
                                                "than this are dropped.", type=int, default=50)
     parser.add_argument('--outputfile', help="Prefix of the output file names. ", type=str)
-    parser.add_argument('--maxwordlength', help="For the character models, words are "
+    parser.add_argument('--maxsentlength', help="For the character models, words are "
                                            "(if longer than maxwordlength) or zero-padded "
                                             "(if shorter) to maxwordlength", type=int, default=35)
     parser.add_argument('--srcvocabfile', help="If working with a preset vocab, "
