@@ -664,6 +664,7 @@ function main()
     local model, model_opt = checkpoint[1], checkpoint[2]
     encoder = model[1]:double()
     decoder = model[2]:double()      
+    sent_conv_model = model[3]:double()
     --generator = model[3]:double()
     criterion = make_criterion(opt)
   end   
