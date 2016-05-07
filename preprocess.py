@@ -76,7 +76,7 @@ def get_data(args):
         num_docs = 0
         for _, (src_orig, targ_orig) in \
                 enumerate(itertools.izip(open(srcfile,'r'), open(targetfile,'r'))):
-            src_orig = src_indexer.clean(src_orig.decode("utf-8").strip())
+            src_orig = src_indexer.clean(src_orig.decode("utf-8").strip()[1:])
             src = src_orig.strip().split("</s>") # might be an extra ''
             if len(src) > seqlength or len(src) < 1:
                 continue
@@ -111,9 +111,8 @@ def get_data(args):
             src_orig = src_indexer.clean(src_orig.decode("utf-8").strip()[1:])
             targ = [0] + targ_orig.strip().split() + [0] # targ and src should be same length
             src = [src_indexer.BOD] + src_orig.strip().split("</s>") + [src_indexer.EOD] # need to add EOD, BOD to word_indexer
-            pdb.set_trace()
             max_doc_l = max(len(targ), len(src), max_doc_l)
-            if len(targ) > newseqlength or len(src) > newseqlength or len(targ) < 3 or len(src) < 3:
+            if len(src) > newseqlength or len(src) < 3:
                 dropped += 1
                 continue                   
             targ = pad(targ, newseqlength+1, 0)#target_indexer.PAD) # just pad with 0s
@@ -230,7 +229,6 @@ def get_data(args):
 
     #prune and write vocab
     src_indexer.prune_vocab(args.srcvocabsize)
-    #target_indexer.prune_vocab(args.targetvocabsize)
     if args.srcvocabfile != '':
         print('Loading pre-specified source vocab from ' + args.srcvocabfile)
         src_indexer.load_vocab(args.srcvocabfile)
@@ -241,15 +239,12 @@ def get_data(args):
     '''
         
     src_indexer.write(args.outputfile + ".src.dict")
-    #target_indexer.write(args.outputfile + ".targ.dict")
     word_indexer.prune_vocab(args.srcvocabsize)
     word_indexer.write(args.outputfile + ".char.dict")
     print("Word vocab size: {}".format(len(word_indexer.pruned_vocab)))
     
     print("Source vocab size: Original = {}, Pruned = {}".format(len(src_indexer.vocab), 
                                                           len(src_indexer.d)))
-    #print("Target vocab size: Original = {}, Pruned = {}".format(len(target_indexer.vocab), 
-    #                                                      len(target_indexer.d)))
 
     max_doc_l = 0
     max_doc_l = convert(args.srcvalfile, args.targetvalfile, args.batchsize, args.seqlength,
