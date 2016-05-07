@@ -208,8 +208,7 @@ function train(train_data, valid_data)
   end   
 
   local h_init_dec = torch.zeros(valid_data.batch_l:max(), opt.rnn_size)
-  local h_init_dec_prob = torch.zeros(valid_data.batch_l:max(), 2) -- prob p_t, added by Jeffrey
-  h_init_dec_prob[{{},2}]:fill(1) -- Jeffrey
+  local h_init_dec_prob = torch.ones(valid_data.batch_l:max(), 1) -- prob p_t, added by Jeffrey
   local h_init_enc = torch.zeros(valid_data.batch_l:max(), opt.rnn_size)      
   if opt.gpuid >= 0 then
     h_init_enc = h_init_enc:cuda()      
@@ -357,7 +356,7 @@ function train(train_data, valid_data)
 
       -- forward prop decoder
       local rnn_state_dec = reset_state(init_fwd_dec, batch_l, 0)
-      rnn_state_dec[0][1] = h_init_dec_prob -- hack by Jeffrey
+      rnn_state_dec[0][1] = h_init_dec_prob[{{1, batch_l}}] -- hack by Jeffrey
       if opt.init_dec == 1 then
         for L = 1, opt.num_layers do
           rnn_state_dec[0][L*2]:copy(rnn_state_enc[source_l][L*2-1])
@@ -373,7 +372,7 @@ function train(train_data, valid_data)
         local out = decoder_clones[t]:forward(decoder_input)
         local next_state = {}
         table.insert(preds, out[#out])
-        table.insert(next_state, torch.exp(out[#out])) -- exp out of log space
+        table.insert(next_state, out[#out])
         for j = 1, #out-1 do
           table.insert(next_state, out[j])
         end
@@ -386,7 +385,7 @@ function train(train_data, valid_data)
       local drnn_state_dec = reset_state(init_bwd_dec, batch_l, 1)
       local loss = 0
       for t = target_l, 1, -1 do
-        local pred = preds[t] -- batch_l x 2
+        local pred = preds[t] -- batch_l x 1
         loss = loss + criterion:forward(pred, target_out[t])/batch_l
         local dl_dpred = criterion:backward(pred, target_out[t])
         dl_dpred:div(batch_l)

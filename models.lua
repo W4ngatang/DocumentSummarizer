@@ -42,7 +42,7 @@ function make_lstm(data, opt, model)
    if model == 'dec' then
       -- TODO: this needs to be bidirectional
       table.insert(inputs, nn.Identity()()) -- source context h_t (batch_size x rnn_size)
-      table.insert(inputs, nn.Identity()()) -- previous prob p_{t-1} (batch_size x 2)
+      table.insert(inputs, nn.Identity()()) -- previous prob p_{t-1} (batch_size x 1)
       offset = offset + 2
    end   
    for L = 1,n do
@@ -66,7 +66,7 @@ function make_lstm(data, opt, model)
        else
          -- decoder
          x = inputs[1]
-         local prob = nn.Select(2,2)(inputs[offset+1]) -- batch_size x 1
+         local prob = nn.Sum(2)(inputs[offset+1]) -- batch_size, 1 dim
          prob = nn.Replicate(input_size,2)(prob) -- batch_size x input_size
          x = nn.CMulTable()({prob, x})
          input_size_L = input_size
@@ -107,17 +107,16 @@ function make_lstm(data, opt, model)
 
   if model == 'dec' then
     local top_h = outputs[#outputs]
-    local term1 = nn.LinearNoBias(rnn_size, 2)(top_h)
-    local term2 = nn.LinearNoBias(rnn_size, 2)(inputs[offset])
-    local pred_prob = nn.LogSoftMax()(nn.CAddTable()({term1, term2}))
-    table.insert(outputs, pred_prob) -- p_t for sentence label, batch_l x 2
+    local term1 = nn.LinearNoBias(rnn_size, 1)(top_h)
+    local term2 = nn.LinearNoBias(rnn_size, 1)(inputs[offset])
+    local pred_prob = nn.Sigmoid()(nn.CAddTable()({term1, term2}))
+    table.insert(outputs, pred_prob) -- p_t for sentence label, batch_l x 1
   end
   return nn.gModule(inputs, outputs)
 end
 
 function make_criterion(opt)
-   local w = torch.ones(2)
-   criterion = nn.ClassNLLCriterion(w) -- TODO: ???
+   local criterion = nn.BCECriterion()
    criterion.sizeAverage = false
    return criterion
 end
