@@ -58,18 +58,23 @@ def entity_overlap(src, targ):
 
 def clean_string(string): # some Yoon Kim magic
     string = re.sub(r"[^A-Za-z0-9(),!?\'\`]", " ", string)     
-    string = re.sub(r"\'s", " \'s", string) 
-    string = re.sub(r"\'ve", " \'ve", string) 
-    string = re.sub(r"n\'t", " n\'t", string) 
-    string = re.sub(r"\'re", " \'re", string) 
-    string = re.sub(r"\'d", " \'d", string) 
-    string = re.sub(r"\'ll", " \'ll", string) 
+    string = re.sub(r"\'s", " \"s", string) 
+    string = re.sub(r"\'ve", " \"ve", string) 
+    string = re.sub(r"n\'t", " n\"t", string) 
+    string = re.sub(r"\'re", " \"re", string) 
+    string = re.sub(r"\'d", " \"d", string) 
+    string = re.sub(r"\'ll", " \"ll", string) 
     string = re.sub(r",", " , ", string) 
     string = re.sub(r"!", " ! ", string) 
     string = re.sub(r"\(", " ( ", string) 
     string = re.sub(r"\)", " ) ", string) 
     string = re.sub(r"\?", " ? ", string) 
     string = re.sub(r"\s{2,}", " ", string)    
+    string = re.sub(r"\'", " \' ", string)    
+    string = re.sub(r"i \' m", "i\'m", string) # restore "i'm"
+    string = re.sub(r"[0-9]{1,}", "<NUM>", string)    
+    if string.isdigit():
+        return "<NUM>"
     return string.strip().lower()
     
 # for a doc and a summary, return binary array where 1 if sentence should be kept
@@ -205,7 +210,7 @@ def main(arguments):
     parser.add_argument('--targfile', help="Path to target training data. ", type = str, default="data/cnn-targ.txt")
     parser.add_argument('--pickle', help="Load from pickle or no", type =int, default=1)
     parser.add_argument('--pickle_file', help="Path to pretrained pickle file to read or write. ", type = str, default='cnn.pkl')
-    parser.add_argument('--thresh', help="Threshold for number of overlap sentences to be accepted. ", type=int, default=0)
+    parser.add_argument('--thresh', help="Threshold for number of overlap sentences to be accepted. ", type=int, default=2)
     parser.add_argument('--outfile', help="Prefix of the output file names. ", type=str, default="extract")
     parser.add_argument('--split', help="Fraction of the data in train/valid. ", type=float, default=.8)
     parser.add_argument('--loss', help="Type of loss to use for classifier. ", type=str, default="hinge")
