@@ -83,7 +83,8 @@ cmd:option('-lr_decay', 0.5, [[Decay learning rate by this much if (i) perplexit
 on the validation set or (ii) epoch has gone past the start_decay_at_limit]])
 cmd:option('-start_decay_at', 9, [[Start decay after this epoch]])
 cmd:option('-curriculum', 0, [[For this many epochs, order the minibatches based on source
-sequence length. Sometimes setting this to 1 will increase convergence speed.]]) -- TODO: implement curriculum from their code
+sequence length. Sometimes setting this to 1 will increase convergence speed.]]) 
+cmd:option('-prob_curriculum_epochs', 1, [[Curriculum training on p_t: feed the actual prob into next LSTM instead of prediction for this number of epochs]]) -- TODO: implement curriculum from their code
 cmd:option('-pre_word_vecs_enc', '', [[If a valid path is specified, then this will load 
 pretrained word embeddings (hdf5 file) on the encoder side. 
 See README for specific formatting instructions.]]) -- TODO: load with word2vec
@@ -369,6 +370,10 @@ function train(train_data, valid_data)
       for t = 1, target_l do
         decoder_clones[t]:training()
         local decoder_input = {sent_enc[{{},t}], context[{{},t}], table.unpack(rnn_state_dec[t-1])}
+        if epoch <= opt.prob_curriculum_epochs and t > 1 then
+          -- curriculum: use actual target output for p_t
+          decoder_input[3] = target_out[t-1]
+        end
         local out = decoder_clones[t]:forward(decoder_input)
         local next_state = {}
         table.insert(preds, out[#out])
@@ -391,11 +396,17 @@ function train(train_data, valid_data)
         dl_dpred:div(batch_l)
         drnn_state_dec[#drnn_state_dec]:add(dl_dpred)
         local decoder_input = {sent_enc[{{},t}], context[{{},t}], table.unpack(rnn_state_dec[t-1])}
+        if epoch <= opt.prob_curriculum_epochs and t > 1 then
+          -- curriculum: use actual target output for p_t
+          decoder_input[3] = target_out[t-1]
+        end
         local dlst = decoder_clones[t]:backward(decoder_input, drnn_state_dec)
         -- accumulate encoder/decoder grads
         encoder_grads[{{},t}]:add(dlst[2])
         drnn_state_dec[#drnn_state_dec]:zero()
-        drnn_state_dec[#drnn_state_dec]:add(dlst[3]) -- backprop p_t
+        if epoch > opt.prob_curriculum_epochs then
+          drnn_state_dec[#drnn_state_dec]:add(dlst[3]) -- backprop p_t
+        end
         for j = 4, #dlst do
           drnn_state_dec[j-3]:copy(dlst[j])
         end	    
@@ -482,7 +493,7 @@ function train(train_data, valid_data)
         local stats = string.format('Epoch: %d, Batch: %d/%d, Batch size: %d, LR: %.4f, ',
         epoch, i, data:size(), batch_l, opt.learning_rate)
         stats = stats .. string.format('PPL: %.2f, |Param|: %.2f, |GParam|: %.2f, ',
-        math.exp(train_loss/train_nonzeros), param_norm, grad_norm)
+        math.exp(train_loss/train_nonzeros), param_norm, grad_norm) -- TODO: check what nonzeros is
         stats = stats .. string.format('Training: %d/%d/%d total/source/target tokens/sec',
         (num_words_target+num_words_source) / time_taken,
         num_words_source / time_taken,
@@ -591,8 +602,7 @@ function eval(data)
     nll = nll + loss
     total = total + nonzeros
   end
-  --local valid = math.exp(nll / total)
-  local valid = nll / total -- loss (binary class) instead of perp
+  local valid = math.exp(nll / total)
   print("Valid", valid)
   return valid
 end
