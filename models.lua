@@ -122,6 +122,23 @@ function make_criterion(opt)
    return criterion
 end
 
+-- annoying hack for Sum backward prop
+Sum_nc, _ = torch.class('nn.Sum_nc', 'nn.Sum')
+function Sum_nc:updateGradInput(input, gradOutput)
+    local size = input:size()
+    size[self.dimension] = 1
+    -- modified code:
+    if gradOutput:isContiguous() then
+        gradOutput = gradOutput:view(size) -- doesn't work with non-contiguous tensors
+    else
+        gradOutput = gradOutput:resize(size) -- slower because of memory reallocation and changes gradOutput
+        -- gradOutput = gradOutput:clone():resize(size) -- doesn't change gradOutput; safer and even slower
+    end
+    self.gradInput:resizeAs(input)
+    self.gradInput:copy(gradOutput:expandAs(input))
+    return self.gradInput
+end 
+
 -- cnn Unit
 function make_cnn(input_size, kernel_width, num_kernels)
    local output
@@ -130,7 +147,7 @@ function make_cnn(input_size, kernel_width, num_kernels)
       local conv = cudnn.SpatialConvolution(1, num_kernels, input_size,
 					    kernel_width, 1, 1, 0)
       local conv_layer = conv(nn.View(1, -1, input_size):setNumInputDims(2)(input))
-      output = nn.Sum(3)(nn.Max(3)(nn.Tanh()(conv_layer)))
+      output = nn.Sum_nc(3)(nn.Max(3)(nn.Tanh()(conv_layer)))
    else
       local conv = nn.TemporalConvolution(input_size, num_kernels, kernel_width)
       local conv_layer = conv(input)
