@@ -13,7 +13,7 @@ function make_sent_conv(data, opt)
   local input_size = opt.num_kernels
 
   local input = nn.Identity()()
-  local word_vecs = nn.LookupTable(data.source_size, opt.word_vec_size)
+  local word_vecs = nn.LookupTable(data.char_size, opt.word_vec_size)
   word_vecs.name = 'word_vecs'
   local wordcnn = make_cnn(opt.word_vec_size,  opt.kernel_width, opt.num_kernels)
   wordcnn.name = 'wordcnn'
@@ -34,7 +34,7 @@ function make_lstm(data, opt, model)
    local dropout = opt.dropout or 0
    local n = opt.num_layers
    local rnn_size = opt.rnn_size
-   local input_size = opt.word_vec_size -- size after word embeddings
+   local input_size = opt.num_kernels -- size after conv
 
    local offset = 0
    local inputs = {}
@@ -67,7 +67,7 @@ function make_lstm(data, opt, model)
          -- decoder
          x = inputs[1]
          local prob = nn.Select(2,2)(inputs[offset+1]) -- batch_size x 1
-         prob = nn.Replicate(rnn_size,2)(prob) -- batch_size x rnn_size
+         prob = nn.Replicate(input_size,2)(prob) -- batch_size x input_size
          x = nn.CMulTable()({prob, x})
          input_size_L = input_size
        end
@@ -122,6 +122,23 @@ function make_criterion(opt)
    return criterion
 end
 
+-- annoying hack for Sum backward prop
+Sum_nc, _ = torch.class('nn.Sum_nc', 'nn.Sum')
+function Sum_nc:updateGradInput(input, gradOutput)
+    local size = input:size()
+    size[self.dimension] = 1
+    -- modified code:
+    if gradOutput:isContiguous() then
+        gradOutput = gradOutput:view(size) -- doesn't work with non-contiguous tensors
+    else
+        gradOutput = gradOutput:resize(size) -- slower because of memory reallocation and changes gradOutput
+        -- gradOutput = gradOutput:clone():resize(size) -- doesn't change gradOutput; safer and even slower
+    end
+    self.gradInput:resizeAs(input)
+    self.gradInput:copy(gradOutput:expandAs(input))
+    return self.gradInput
+end 
+
 -- cnn Unit
 function make_cnn(input_size, kernel_width, num_kernels)
    local output
@@ -130,7 +147,7 @@ function make_cnn(input_size, kernel_width, num_kernels)
       local conv = cudnn.SpatialConvolution(1, num_kernels, input_size,
 					    kernel_width, 1, 1, 0)
       local conv_layer = conv(nn.View(1, -1, input_size):setNumInputDims(2)(input))
-      output = nn.Sum(3)(nn.Max(3)(nn.Tanh()(conv_layer)))
+      output = nn.Sum_nc(3)(nn.Max(3)(nn.Tanh()(conv_layer)))
    else
       local conv = nn.TemporalConvolution(input_size, num_kernels, kernel_width)
       local conv_layer = conv(input)

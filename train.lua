@@ -33,7 +33,7 @@ cmd:text("")
 cmd:text("**Model options**")
 cmd:text("")
 
-cmd:option('-num_layers', 2, [[Number of layers in the LSTM encoder/decoder]])
+cmd:option('-num_layers', 1, [[Number of layers in the LSTM encoder/decoder]])
 cmd:option('-rnn_size', 500, [[Size of LSTM hidden states]])
 cmd:option('-word_vec_size', 300, [[Word embedding sizes]]) -- 300 for word2vec
 cmd:option('-use_chars_enc', 1, [[If 1, use character on the encoder 
@@ -60,9 +60,8 @@ cmd:text("Below options only apply if using the character model.")
 cmd:text("")
 
 -- char-cnn model specs (if use_chars == 1)
-cmd:option('-kernel_width', 6, [[Size (i.e. width) of the convolutional filter]])
--- TODO: may be a problem with num_kernel usage as size of some layers. check this
-cmd:option('-num_kernels', 1000, [[Number of convolutional filters (feature maps). So the
+cmd:option('-kernel_width', 3, [[Size (i.e. width) of the convolutional filter]])
+cmd:option('-num_kernels', 100, [[Number of convolutional filters (feature maps). So the
 representation from characters will have this many dimensions]])
 cmd:option('-num_highway_layers', 0, [[Number of highway layers in the character model]]) -- set 0 for now
 
@@ -99,16 +98,16 @@ cmd:text("**Other options**")
 cmd:text("")
 
 
-cmd:option('-start_symbol', 0, [[Use special start-of-sentence and end-of-sentence tokens
+cmd:option('-start_symbol', 1, [[Use special start-of-sentence and end-of-sentence tokens
 on the source side. We've found this to make minimal difference]])
 -- GPU
-cmd:option('-gpuid', -1, [[Which gpu to use. -1 = use CPU]])
+cmd:option('-gpuid', 1, [[Which gpu to use. -1 = use CPU]]) -- default 1 Jeffrey
 cmd:option('-gpuid2', -1, [[If this is >= 0, then the model will use two GPUs whereby the encoder
 is on the first GPU and the decoder is on the second GPU. 
 This will allow you to train with bigger batches/models.]])
-cmd:option('-cudnn', 0, [[Whether to use cudnn or not for convolutions (for the character model).
+cmd:option('-cudnn', 1, [[Whether to use cudnn or not for convolutions (for the character model).
 cudnn has much faster convolutions so this is highly recommended 
-if using the character model]])
+if using the character model]]) -- default 1 Jeffrey
 -- bookkeeping
 cmd:option('-save_every', 1, [[Save every this many epochs]])
 cmd:option('-print_every', 50, [[Print stats after this many batches]])
@@ -195,6 +194,7 @@ function train(train_data, valid_data)
   -- clone encoder/decoder up to max source/target length   
   decoder_clones = clone_many_times(decoder, opt.max_sent_l)
   encoder_clones = clone_many_times(encoder, opt.max_sent_l)
+  sent_conv_model_clones = clone_many_times(sent_conv_model, opt.max_sent_l) -- added by Jeffrey
   for i = 1, opt.max_sent_l do
     attn_clones_idx = i
     decoder_clones[i]:apply(get_layer)
@@ -207,10 +207,13 @@ function train(train_data, valid_data)
   end   
 
   local h_init_dec = torch.zeros(valid_data.batch_l:max(), opt.rnn_size)
+  local h_init_dec_prob = torch.zeros(valid_data.batch_l:max(), 2) -- prob p_t, added by Jeffrey
+  h_init_dec_prob[{{},2}]:fill(1) -- Jeffrey
   local h_init_enc = torch.zeros(valid_data.batch_l:max(), opt.rnn_size)      
   if opt.gpuid >= 0 then
     h_init_enc = h_init_enc:cuda()      
     h_init_dec = h_init_dec:cuda()
+    h_init_dec_prob = h_init_dec_prob:cuda()
     cutorch.setDevice(opt.gpuid)
     if opt.gpuid2 >= 0 then
       cutorch.setDevice(opt.gpuid)
@@ -229,8 +232,8 @@ function train(train_data, valid_data)
 
   init_fwd_enc = {}
   init_bwd_enc = {}
-  init_fwd_dec = {h_init_dec:clone()} -- initial context
-  init_bwd_dec = {h_init_dec:clone()} -- just need one copy of this
+  init_fwd_dec = {h_init_dec_prob:clone()} -- initial context
+  init_bwd_dec = {}
 
   for L = 1, opt.num_layers do
     table.insert(init_fwd_enc, h_init_enc:clone())
@@ -242,6 +245,7 @@ function train(train_data, valid_data)
     table.insert(init_bwd_dec, h_init_dec:clone())
     table.insert(init_bwd_dec, h_init_dec:clone())      
   end      
+  table.insert(init_bwd_dec, h_init_dec_prob:clone():zero()) -- p_t is the last thing output
 
   function reset_state(state, batch_l, t)
     local u = {[t] = {}}
@@ -311,6 +315,7 @@ function train(train_data, valid_data)
       end
       local target, target_out, nonzeros, source = d[1], d[2], d[3], d[4]
       local batch_l, target_l, source_l = d[5], d[6], d[7]
+      assert(source_l == target_l, source_l .. " " .. target_l)
       if opt.reverse_src == 1 then
         local source_rev = d[8] -- for bidirectional
         -- TODO: bidirectional - need to clone another encoder LSTM, and feed it source_rev
@@ -326,12 +331,17 @@ function train(train_data, valid_data)
         cutorch.setDevice(opt.gpuid)
       end
 
+      -- forward sent conv
+      for t = 1, source_l do
+        sent_conv_model_clones[t]:training()
+        local s = sent_conv_model_clones[t]:forward(source[t]) -- create s_t once
+        sent_enc[{{},t}]:copy(s)
+      end
+
       -- forward prop encoder
       for t = 1, source_l do
         encoder_clones[t]:training()
-        local s = sent_conv_model:forward(source[t]) -- create s_t once
-        sent_enc[{{},t}]:copy(s)
-        local encoder_input = {s, table.unpack(rnn_state_enc[t-1])}
+        local encoder_input = {sent_enc[{{},t}], table.unpack(rnn_state_enc[t-1])}
         local out = encoder_clones[t]:forward(encoder_input)
         rnn_state_enc[t] = out
         context[{{},t}]:copy(out[#out])
@@ -346,6 +356,7 @@ function train(train_data, valid_data)
 
       -- forward prop decoder
       local rnn_state_dec = reset_state(init_fwd_dec, batch_l, 0)
+      rnn_state_dec[3] = h_init_dec_prob -- hack by Jeffrey
       if opt.init_dec == 1 then
         for L = 1, opt.num_layers do
           rnn_state_dec[0][L*2]:copy(rnn_state_enc[source_l][L*2-1])
@@ -357,7 +368,7 @@ function train(train_data, valid_data)
       local decoder_input
       for t = 1, target_l do
         decoder_clones[t]:training()
-        local decoder_input = {sent_enc[t], context[t], table.unpack(rnn_state_dec[t-1])}
+        local decoder_input = {sent_enc[{{},t}], context[{{},t}], table.unpack(rnn_state_dec[t-1])}
         local out = decoder_clones[t]:forward(decoder_input)
         local next_state = {}
         table.insert(preds, out[#out])
@@ -379,7 +390,7 @@ function train(train_data, valid_data)
         local dl_dpred = criterion:backward(pred, target_out[t])
         dl_dpred:div(batch_l)
         drnn_state_dec[#drnn_state_dec]:add(dl_dpred)
-        local decoder_input = {sent_enc[t], context[t], table.unpack(rnn_state_dec[t-1])}
+        local decoder_input = {sent_enc[{{},t}], context[{{},t}], table.unpack(rnn_state_dec[t-1])}
         local dlst = decoder_clones[t]:backward(decoder_input, drnn_state_dec)
         -- accumulate encoder/decoder grads
         encoder_grads[{{},t}]:add(dlst[2])
@@ -398,7 +409,7 @@ function train(train_data, valid_data)
       --end
 
       local grad_norm = 0
-      grad_norm = grad_norm + grad_params[2]:norm()^2 + grad_params[3]:norm()^2
+      grad_norm = grad_norm + grad_params[2]:norm()^2 -- + grad_params[3]:norm()^2
 
       -- backward prop encoder
       if opt.gpuid >= 0 and opt.gpuid2 >= 0 then
@@ -418,7 +429,7 @@ function train(train_data, valid_data)
       end
 
       for t = source_l, 1, -1 do
-        local encoder_input = {sent_enc[t], table.unpack(rnn_state_enc[t-1])}
+        local encoder_input = {sent_enc[{{},t}], table.unpack(rnn_state_enc[t-1])}
         drnn_state_enc[#drnn_state_enc]:add(encoder_grads[{{},t}])
         local dlst = encoder_clones[t]:backward(encoder_input, drnn_state_enc)
         for j = 1, #drnn_state_enc do
@@ -431,9 +442,8 @@ function train(train_data, valid_data)
 
       -- backprop sent_conv
       for t = source_l, 1, -1 do
-        sent_conv_model:forward(source[t]) -- inefficient, but needed if not cloning: TODO fix this
         local dl_ds = sent_enc_grads[{{},t}]
-        sent_conv_model:backward(source[t], dl_ds)
+        sent_conv_model_clones[t]:backward(source[t], dl_ds)
       end
       -- fix word embeddings
       word_vecs_enc.gradWeight[1]:zero()
@@ -441,7 +451,7 @@ function train(train_data, valid_data)
         word_vecs_enc.gradWeight:zero()
       end
 
-      grad_norm = (grad_norm + grad_params[1]:norm()^2)^0.5
+      grad_norm = (grad_norm + grad_params[1]:norm()^2 + grad_params[3]:norm()^2)^0.5
 
       -- Shrink norm and update params
       local param_norm = 0
@@ -489,7 +499,6 @@ function train(train_data, valid_data)
   local total_loss, total_nonzeros, batch_loss, batch_nonzeros
   for epoch = opt.start_epoch, opt.epochs do
     --generator:training()
-    sent_conv_model:training()
     if opt.num_shards > 0 then
       total_loss = 0
       total_nonzeros = 0	 
@@ -531,7 +540,7 @@ end
 function eval(data)
   encoder_clones[1]:evaluate()   
   decoder_clones[1]:evaluate() -- just need one clone
-  sent_conv_model:evaluate()
+  sent_conv_model_clones[1]:evaluate()
   --generator:evaluate()
   local nll = 0
   local total = 0
@@ -544,7 +553,7 @@ function eval(data)
     local sent_enc = sent_enc_proto[{{1, batch_l}, {1, source_l}}]
     -- forward prop encoder
     for t = 1, source_l do
-      local s = sent_conv_model:forward(source[t])
+      local s = sent_conv_model_clones[1]:forward(source[t])
       sent_enc[{{},t}]:copy(s)
       local encoder_input = {s, table.unpack(rnn_state_enc)}
       local out = encoder_clones[1]:forward(encoder_input)
@@ -568,7 +577,7 @@ function eval(data)
     end      
     local loss = 0
     for t = 1, target_l do
-      local decoder_input = {sent_enc[t], context[t], table.unpack(rnn_state_dec)}
+      local decoder_input = {sent_enc[{{},t}], context[{{},t}], table.unpack(rnn_state_dec)}
       local out = decoder_clones[1]:forward(decoder_input)
       rnn_state_dec = {}
       table.insert(rnn_state_dec, out[#out])
@@ -682,7 +691,6 @@ function main()
   decoder:apply(get_layer)   
   sent_conv_model:apply(get_layer)
 
-  io.read()
   train(train_data, valid_data)
 end
 
