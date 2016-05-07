@@ -11,6 +11,7 @@ import numpy as np
 import h5py
 import itertools
 import pdb
+import re
 from collections import defaultdict
 
 class Indexer:
@@ -67,7 +68,23 @@ def pad(ls, length, symbol):
     if len(ls) >= length:
         return ls[:length]
     return ls + [symbol] * (length -len(ls))
-        
+
+def clean_string(string): # some Yoon Kim magic
+    string = re.sub(r"[^A-Za-z0-9(),!?\'\`]", " ", string)     
+    string = re.sub(r"\'s", " \'s", string) 
+    string = re.sub(r"\'ve", " \'ve", string) 
+    string = re.sub(r"n\'t", " n\'t", string) 
+    string = re.sub(r"\'re", " \'re", string) 
+    string = re.sub(r"\'d", " \'d", string) 
+    string = re.sub(r"\'ll", " \'ll", string) 
+    string = re.sub(r",", " , ", string) 
+    string = re.sub(r"!", " ! ", string) 
+    string = re.sub(r"\(", " ( ", string) 
+    string = re.sub(r"\)", " ) ", string) 
+    string = re.sub(r"\?", " ? ", string) 
+    string = re.sub(r"\s{2,}", " ", string)    
+    return string.strip().lower()
+
 def get_data(args):
     src_indexer = Indexer(["<blank>","<unk>","<d>","</d>"])
     word_indexer = Indexer(["<blank>","<unk>","<s>", "</s>"])
@@ -87,8 +104,8 @@ def get_data(args):
                 sent = word_indexer.clean(sent)
                 if len(sent) == 0:
                     continue
-                max_sent_l = max(len(sent)+2, max_sent_l)
-                words = sent.split()
+                words = sent.split() #[clean_string(s) for s in sent.split()]
+                max_sent_l = max(len(words)+2, max_sent_l)
                 for word in words:
                     word_indexer.vocab[word] += 1                                        
                 
@@ -97,6 +114,7 @@ def get_data(args):
     def convert(srcfile, targetfile, batchsize, seqlength, outfile, num_docs,
                 max_sent_l, max_doc_l=0, unkfilter=0):
         
+        pdb.set_trace()
         newseqlength = seqlength + 2 #add 2 for EOS and BOS; length (in sentences) of the longest document
         targets = np.zeros((num_docs, newseqlength), dtype=int) # the target sequence, used as inputs into the next prediction
         target_output = np.zeros((num_docs, newseqlength), dtype=int) # the actual next word you want to be predicting
@@ -228,23 +246,15 @@ def get_data(args):
     print("Max sentence length (after cutting): {}".format(max_sent_l))
 
     #prune and write vocab
-    src_indexer.prune_vocab(args.srcvocabsize)
+    word_indexer.prune_vocab(args.srcvocabsize)
     if args.srcvocabfile != '':
         print('Loading pre-specified source vocab from ' + args.srcvocabfile)
-        src_indexer.load_vocab(args.srcvocabfile)
-    '''
-    if args.targetvocabfile != '':
-        print('Loading pre-specified target vocab from ' + args.targetvocabfile)
-        target_indexer.load_vocab(args.targetvocabfile)
-    '''
-        
-    src_indexer.write(args.outputfile + ".src.dict")
-    word_indexer.prune_vocab(args.srcvocabsize)
-    word_indexer.write(args.outputfile + ".char.dict")
+        word_indexer.load_vocab(args.srcvocabfile)
+    word_indexer.write(args.outputfile + ".word.dict")
     print("Word vocab size: {}".format(len(word_indexer.pruned_vocab)))
     
-    print("Source vocab size: Original = {}, Pruned = {}".format(len(src_indexer.vocab), 
-                                                          len(src_indexer.d)))
+    print("Source vocab size: Original = {}, Pruned = {}".format(len(word_indexer.vocab), 
+                                                          len(word_indexer.d)))
 
     max_doc_l = 0
     max_doc_l = convert(args.srcvalfile, args.targetvalfile, args.batchsize, args.seqlength,

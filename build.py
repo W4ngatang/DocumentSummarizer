@@ -151,6 +151,12 @@ def get_data(args):
     return features
 
 def prune(args, model, data):
+
+    def clean(doc):
+        sents = [clean_string(s) for s in doc.split("</s>")[1:]]
+        doc = ' </s> '.join(sents)
+        return doc
+
     split = args.split
     val_flag = 0
     srcfile = open(args.outfile+'-src.txt', 'w+')
@@ -166,7 +172,7 @@ def prune(args, model, data):
                 continue
             predictions = model.predict(data[i])
             if sum(predictions) > args.thresh: # if there is a nonzero entry
-                accepted.append(documents[i])
+                accepted.append(clean(documents[i]))
                 accepted_t.append(predictions)
                 ndocs += 1
             if not (i % 10000):
