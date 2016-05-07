@@ -69,22 +69,6 @@ def pad(ls, length, symbol):
         return ls[:length]
     return ls + [symbol] * (length -len(ls))
 
-def clean_string(string): # some Yoon Kim magic
-    string = re.sub(r"[^A-Za-z0-9(),!?\'\`]", " ", string)     
-    string = re.sub(r"\'s", " \'s", string) 
-    string = re.sub(r"\'ve", " \'ve", string) 
-    string = re.sub(r"n\'t", " n\'t", string) 
-    string = re.sub(r"\'re", " \'re", string) 
-    string = re.sub(r"\'d", " \'d", string) 
-    string = re.sub(r"\'ll", " \'ll", string) 
-    string = re.sub(r",", " , ", string) 
-    string = re.sub(r"!", " ! ", string) 
-    string = re.sub(r"\(", " ( ", string) 
-    string = re.sub(r"\)", " ) ", string) 
-    string = re.sub(r"\?", " ? ", string) 
-    string = re.sub(r"\s{2,}", " ", string)    
-    return string.strip().lower()
-
 def get_data(args):
     src_indexer = Indexer(["<blank>","<unk>","<d>","</d>"])
     word_indexer = Indexer(["<blank>","<unk>","<s>", "</s>"])
@@ -114,7 +98,6 @@ def get_data(args):
     def convert(srcfile, targetfile, batchsize, seqlength, outfile, num_docs,
                 max_sent_l, max_doc_l=0, unkfilter=0):
         
-        pdb.set_trace()
         newseqlength = seqlength + 2 #add 2 for EOS and BOS; length (in sentences) of the longest document
         targets = np.zeros((num_docs, newseqlength), dtype=int) # the target sequence, used as inputs into the next prediction
         target_output = np.zeros((num_docs, newseqlength), dtype=int) # the actual next word you want to be predicting
