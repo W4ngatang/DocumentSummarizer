@@ -118,7 +118,7 @@ def get_data(args):
                 continue                   
             targ = pad(targ, newseqlength+1, 0)#target_indexer.PAD) # just pad with 0s
             targ = np.array(targ, dtype=int)
-            targ += 1
+            targ += 1 # 1-indexing for lua
 
             src = pad(src, newseqlength, src_indexer.PAD)
             src_word = []
@@ -130,7 +130,7 @@ def get_data(args):
                     words[-1] = word_indexer.EOD
                 word_idx = word_indexer.convert_sequence(pad(words, max_sent_l, word_indexer.PAD))
                 src_word.append(word_idx)
-            src = [1 if x != src_indexer.PAD else 0 for x in src] #src_indexer.convert_sequence(src); hacky convert to deal with sentences
+            src = [1 if x != src_indexer.PAD else 0 for x in src] # 0 if pad, 1 o.w.
             src = np.array(src, dtype=int)
             
             # want to adjust unkfilter so it filters out by word (analagous: char level)
@@ -172,12 +172,12 @@ def get_data(args):
             if source_lengths[i] > curr_l:
                 curr_l = source_lengths[i]
                 l_location.append(j+1)
-        l_location.append(len(sources)) # l_location is array where array sentence length changes happen
+        l_location.append(len(sources)) # l_location is array where sentence length changes happen
 
         #get batch sizes
         curr_idx = 1
         batch_idx = [1]
-        nonzeros = [] # number of nonzero entries 
+        nonzeros = [] # number of non padding entries in the entire batch
         batch_l = [] # batch lengths (number of sentences in the batch)
         batch_w = [] # batch widths (length of the sentences in the batch)
         target_l_max = []
@@ -188,8 +188,9 @@ def get_data(args):
         for i in range(len(batch_idx)-1): # iterate over batch_idx
             batch_l.append(batch_idx[i+1] - batch_idx[i])            
             batch_w.append(source_l[batch_idx[i]-1])
-            nonzeros.append((target_output[batch_idx[i]-1:batch_idx[i+1]-1] != 1).sum().sum())
+            nonzeros.append((sources[batch_idx[i]-1:batch_idx[i+1]-1] == 1).sum().sum())
             target_l_max.append(max(target_l[batch_idx[i]-1:batch_idx[i+1]-1]))
+        pdb.set_trace()
         # NOTE: actual batching is done in data.lua
 
         # Write output
