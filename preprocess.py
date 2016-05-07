@@ -64,26 +64,34 @@ class Indexer:
             v, k = line.decode("utf-8").strip().split()
             self.d[v] = int(k)
             
+def load_bin_vec(fname, vocab):
+    """
+    Loads 300x1 word vecs from Google (Mikolov) word2vec
+    """
+    word_vecs = {}
+    with open(fname, "rb") as f:
+        header = f.readline()
+        vocab_size, layer1_size = map(int, header.split())
+        binary_len = np.dtype('float32').itemsize * layer1_size
+        for line in xrange(vocab_size):
+            word = []
+            while True:
+                ch = f.read(1)
+                if ch == ' ':
+                    word = ''.join(word)
+                    break
+                if ch == '\n':
+                    word.append(ch)
+            if word in vocab:
+                word_vecs[word] = np.fromstring(f.read(binary_len), dtype='float32')
+            else:
+                f.read(binary_len)
+    return word_vecs
+
 def pad(ls, length, symbol):
     if len(ls) >= length:
         return ls[:length]
     return ls + [symbol] * (length -len(ls))
-
-def clean_string(string): # some Yoon Kim magic
-    string = re.sub(r"[^A-Za-z0-9(),!?\'\`]", " ", string)     
-    string = re.sub(r"\'s", " \'s", string) 
-    string = re.sub(r"\'ve", " \'ve", string) 
-    string = re.sub(r"n\'t", " n\'t", string) 
-    string = re.sub(r"\'re", " \'re", string) 
-    string = re.sub(r"\'d", " \'d", string) 
-    string = re.sub(r"\'ll", " \'ll", string) 
-    string = re.sub(r",", " , ", string) 
-    string = re.sub(r"!", " ! ", string) 
-    string = re.sub(r"\(", " ( ", string) 
-    string = re.sub(r"\)", " ) ", string) 
-    string = re.sub(r"\?", " ? ", string) 
-    string = re.sub(r"\s{2,}", " ", string)    
-    return string.strip().lower()
 
 def get_data(args):
     src_indexer = Indexer(["<blank>","<unk>","<d>","</d>"])
@@ -93,7 +101,7 @@ def get_data(args):
         num_docs = 0
         for _, (src_orig, targ_orig) in \
                 enumerate(itertools.izip(open(srcfile,'r'), open(targetfile,'r'))):
-            src_orig = src_indexer.clean(src_orig.decode("utf-8").strip()[1:])
+            src_orig = src_indexer.clean(src_orig.decode("utf-8").strip())
             src = src_orig.strip().split("</s>") # might be an extra ''
             if len(src) > seqlength or len(src) < 1:
                 continue
@@ -104,7 +112,7 @@ def get_data(args):
                 sent = word_indexer.clean(sent)
                 if len(sent) == 0:
                     continue
-                words = sent.split() #[clean_string(s) for s in sent.split()]
+                words = sent.split() 
                 max_sent_l = max(len(words)+2, max_sent_l)
                 for word in words:
                     word_indexer.vocab[word] += 1                                        
@@ -114,27 +122,27 @@ def get_data(args):
     def convert(srcfile, targetfile, batchsize, seqlength, outfile, num_docs,
                 max_sent_l, max_doc_l=0, unkfilter=0):
         
-        newseqlength = seqlength + 2 #add 2 for EOS and BOS; length (in sentences) of the longest document
-        targets = np.zeros((num_docs, newseqlength), dtype=int) # the target sequence, used as inputs into the next prediction
-        target_output = np.zeros((num_docs, newseqlength), dtype=int) # the actual next word you want to be predicting
+        newseqlength = seqlength + 2 #add 2 for EOS and BOS; length in sents of the longest document
+        targets = np.zeros((num_docs, newseqlength), dtype=int) # the target sequence
+        target_output = np.zeros((num_docs, newseqlength), dtype=int) # next word to predict
         sources = np.zeros((num_docs, newseqlength), dtype=int) # input split into sentences
         source_lengths = np.zeros((num_docs,), dtype=int) # lengths of each document
         target_lengths = np.zeros((num_docs,), dtype=int) # lengths of each target sequence
-        sources_word = np.zeros((num_docs, newseqlength, max_sent_l), dtype=int) # input where each sentence is split into words
+        sources_word = np.zeros((num_docs, newseqlength, max_sent_l), dtype=int) # input  by word
         dropped = 0
         doc_id = 0
         for _, (src_orig, targ_orig) in \
                 enumerate(itertools.izip(open(srcfile,'r'), open(targetfile,'r'))):
-            src_orig = src_indexer.clean(src_orig.decode("utf-8").strip()[1:])
+            src_orig = src_indexer.clean(src_orig.decode("utf-8").strip())
             targ = [0] + targ_orig.strip().split() + [0] # targ and src should be same length
-            src = [src_indexer.BOD] + src_orig.strip().split("</s>") + [src_indexer.EOD] # need to add EOD, BOD to word_indexer
+            src = [src_indexer.BOD] + src_orig.strip().split("</s>") + [src_indexer.EOD]
             max_doc_l = max(len(targ), len(src), max_doc_l)
             if len(src) > newseqlength or len(src) < 3:
                 dropped += 1
                 continue                   
-            targ = pad(targ, newseqlength+1, 0)#target_indexer.PAD) # just pad with 0s
+            targ = pad(targ, newseqlength+1, 0)
             targ = np.array(targ, dtype=int)
-            targ += 1 # 1-indexing for lua
+            #targ += 1 # 1-indexing for lua
 
             src = pad(src, newseqlength, src_indexer.PAD)
             src_word = []
@@ -149,16 +157,14 @@ def get_data(args):
             src = [1 if x != src_indexer.PAD else 0 for x in src] # 0 if pad, 1 o.w.
             src = np.array(src, dtype=int)
             
-            # want to adjust unkfilter so it filters out by word (analagous: char level)
-            '''
             if unkfilter > 0:
-                src_unks = float((src == 2).sum()) # TODO SHOULD RUN FILTER ON src_words                
+                src_unks = float((src_word == 2).sum().sum()) 
                 if unkfilter < 1: #unkfilter is a percentage if < 1
-                    src_unks = src_unks/(len(src)-2)
+                    doc_length = float((src_word != 1).sum().sum())
+                    src_unks = src_unks/doc_length
                 if src_unks > unkfilter:
                     dropped += 1
                     continue
-            '''
                 
             targets[doc_id] = np.array(targ[:-1],dtype=int) # get all but the last pad
             target_output[doc_id] = np.array(targ[1:],dtype=int)                    
@@ -206,7 +212,6 @@ def get_data(args):
             batch_w.append(source_l[batch_idx[i]-1])
             nonzeros.append((sources[batch_idx[i]-1:batch_idx[i+1]-1] == 1).sum().sum())
             target_l_max.append(max(target_l[batch_idx[i]-1:batch_idx[i+1]-1]))
-        pdb.set_trace()
         # NOTE: actual batching is done in data.lua
 
         # Write output
@@ -229,7 +234,7 @@ def get_data(args):
         f["source_char"] = sources_word
         del sources_word
         f["char_size"] = np.array([len(word_indexer.d)])
-        print("Saved {} sentences (dropped {} due to length/unk filter)".format(
+        print("Saved {} documents (dropped {} due to length/unk filter)".format(
             len(f["source"]), dropped))
         f.close()                
         return max_sent_l
@@ -251,9 +256,7 @@ def get_data(args):
         print('Loading pre-specified source vocab from ' + args.srcvocabfile)
         word_indexer.load_vocab(args.srcvocabfile)
     word_indexer.write(args.outputfile + ".word.dict")
-    print("Word vocab size: {}".format(len(word_indexer.pruned_vocab)))
-    
-    print("Source vocab size: Original = {}, Pruned = {}".format(len(word_indexer.vocab), 
+    print("Word vocab size: Original = {}, Pruned = {}".format(len(word_indexer.vocab), 
                                                           len(word_indexer.d)))
 
     max_doc_l = 0
