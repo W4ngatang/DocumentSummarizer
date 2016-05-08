@@ -63,30 +63,44 @@ class Indexer:
         for line in open(vocab_file, 'r'):
             v, k = line.decode("utf-8").strip().split()
             self.d[v] = int(k)
-            
-def load_bin_vec(fname, vocab):
-    """
-    Loads 300x1 word vecs from Google (Mikolov) word2vec
-    """
-    word_vecs = {}
-    with open(fname, "rb") as f:
-        header = f.readline()
-        vocab_size, layer1_size = map(int, header.split())
-        binary_len = np.dtype('float32').itemsize * layer1_size
-        for line in xrange(vocab_size):
-            word = []
-            while True:
-                ch = f.read(1)
-                if ch == ' ':
-                    word = ''.join(word)
-                    break
-                if ch == '\n':
-                    word.append(ch)
-            if word in vocab:
-                word_vecs[word] = np.fromstring(f.read(binary_len), dtype='float32')
-            else:
-                f.read(binary_len)
-    return word_vecs
+
+def build_embeds(fname, outfile, words):
+    def load_bin_vec(fname, vocab):
+        """
+        Loads 300x1 word vecs from Google (Mikolov) word2vec
+        """
+        word_vecs = {}
+        with open(fname, "rb") as f:
+            header = f.readline()
+            vocab_size, layer1_size = map(int, header.split())
+            binary_len = np.dtype('float32').itemsize * layer1_size
+            for line in xrange(vocab_size):
+                word = []
+                while True:
+                    ch = f.read(1)
+                    if ch == ' ':
+                        word = ''.join(word)
+                        break
+                    if ch != '\n':
+                        word.append(ch)
+                if word in vocab:
+                    word_vecs[word] = np.fromstring(f.read(binary_len), dtype='float32')
+                else:
+                    f.read(binary_len)
+        pdb.set_trace()
+        return word_vecs
+
+    word_vecs = load_bin_vec(fname, words)
+    embeds = np.random.uniform(-0.25, 0.25, (len(words), len(word_vecs.values()[0])))
+    embeds[0] = 0
+    for word, vec in word_vecs.iteritems():
+        embeds[words[word]-1] = vec
+
+    f = h5py.File(outfile, "w")
+    f["source"] = np.array(embeds) # sources is now binary where 1 = not pad, 0 = pad
+    f.close()
+
+    #return embeds
 
 def pad(ls, length, symbol):
     if len(ls) >= length:
@@ -179,9 +193,6 @@ def get_data(args):
             if not (doc_id % 100000):
                 print("{}/{} sentences processed".format(doc_id, num_docs))
 
-        pdb.set_trace()
-
-        print(doc_id, num_docs)
         #break up batches based on source lengths
         # get source_lengths into a particular shape then sort by length
         source_lengths = source_lengths[:doc_id]
@@ -257,12 +268,13 @@ def get_data(args):
 
     #prune and write vocab
     word_indexer.prune_vocab(args.srcvocabsize)
-    if args.srcvocabfile != '':
-        print('Loading pre-specified source vocab from ' + args.srcvocabfile)
-        word_indexer.load_vocab(args.srcvocabfile)
     word_indexer.write(args.outputfile + ".word.dict")
     print("Word vocab size: Original = {}, Pruned = {}".format(len(word_indexer.vocab), 
                                                           len(word_indexer.d)))
+
+    if args.srcvocabfile != '':
+        print('Building embeddings from ' + args.srcvocabfile)
+        build_embeds(args.srcvocabfile, args.vocabfile, word_indexer.d)
 
     max_doc_l = 0
     max_doc_l = convert(args.srcvalfile, args.targetvalfile, args.batchsize, args.seqlength,
@@ -305,6 +317,7 @@ def main(arguments):
                                           "then including this will ignore srcvocabsize and use the"
                                           "vocab provided here.",
                                           type = str, default='')
+    parser.add_argument('--vocabfile', help="If working with a preset vocab, ", type=str, default='')
     parser.add_argument('--targetvocabfile', help="If working with a preset vocab, "
                                          "then including this will ignore targetvocabsize and "
                                          "use the vocab provided here.",
