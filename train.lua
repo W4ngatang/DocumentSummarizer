@@ -84,7 +84,7 @@ on the validation set or (ii) epoch has gone past the start_decay_at_limit]])
 cmd:option('-start_decay_at', 9, [[Start decay after this epoch]])
 cmd:option('-curriculum', 0, [[For this many epochs, order the minibatches based on source
 sequence length. Sometimes setting this to 1 will increase convergence speed.]]) 
-cmd:option('-prob_curriculum_epochs', 0, [[Curriculum training on p_t: feed the actual prob into next LSTM instead of prediction for this number of epochs]]) -- TODO: implement curriculum from their code
+cmd:option('-prob_curriculum_epochs', 1, [[Curriculum training on p_t: feed the actual prob into next LSTM instead of prediction for this number of epochs]]) -- TODO: implement curriculum from their code
 cmd:option('-pre_word_vecs_enc', '', [[If a valid path is specified, then this will load 
 pretrained word embeddings (hdf5 file) on the encoder side. 
 See README for specific formatting instructions.]]) -- TODO: load with word2vec
@@ -106,7 +106,7 @@ cmd:option('-gpuid', -1, [[Which gpu to use. -1 = use CPU]])
 cmd:option('-gpuid2', -1, [[If this is >= 0, then the model will use two GPUs whereby the encoder
 is on the first GPU and the decoder is on the second GPU. 
 This will allow you to train with bigger batches/models.]])
-cmd:option('-cudnn', 0, [[Whether to use cudnn or not for convolutions (for the character model).
+cmd:option('-cudnn', 1, [[Whether to use cudnn or not for convolutions (for the character model).
 cudnn has much faster convolutions so this is highly recommended 
 if using the character model]])
 -- bookkeeping
@@ -369,6 +369,10 @@ function train(train_data, valid_data)
       for t = 1, target_l do
         decoder_clones[t]:training()
         local decoder_input = {sent_enc[{{},t}], context[{{},t}], table.unpack(rnn_state_dec[t-1])}
+        if epoch <= opt.prob_curriculum_epochs and t > 1 then
+          -- use curriculum learning with actual target_out
+          decoder_input[3] = target_out[t]:view(target_out[t]:size(1), 1)
+        end
         local out = decoder_clones[t]:forward(decoder_input)
         local next_state = {}
         table.insert(preds, out[#out])
@@ -391,10 +395,17 @@ function train(train_data, valid_data)
         dl_dpred:div(batch_l)
         drnn_state_dec[#drnn_state_dec]:add(dl_dpred)
         local decoder_input = {sent_enc[{{},t}], context[{{},t}], table.unpack(rnn_state_dec[t-1])}
+        if epoch <= opt.prob_curriculum_epochs and t > 1 then
+          -- use curriculum learning with actual target_out
+          decoder_input[3] = target_out[t]:view(target_out[t]:size(1), 1)
+        end
         local dlst = decoder_clones[t]:backward(decoder_input, drnn_state_dec)
         -- accumulate encoder/decoder grads
         encoder_grads[{{},t}]:add(dlst[2])
         drnn_state_dec[#drnn_state_dec]:zero()
+        if epoch > opt.prob_curriculum_epochs or opt.prob_curriculum_epochs == 0 then
+          drnn_state_dec[#drnn_state_dec]:add(dlst[3]) -- backprop p_t
+        end
         for j = 4, #dlst do
           drnn_state_dec[j-3]:copy(dlst[j])
         end	    
