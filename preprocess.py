@@ -101,8 +101,8 @@ def get_data(args):
         num_docs = 0
         for _, (src_orig, targ_orig) in \
                 enumerate(itertools.izip(open(srcfile,'r'), open(targetfile,'r'))):
-            src_orig = src_indexer.clean(src_orig.decode("utf-8").strip())
-            src = src_orig.strip().split("</s>") # might be an extra ''
+            src_orig = src_indexer.clean(src_orig.decode("utf-8").strip()) # do these do anything?
+            src = src_orig.strip().split("</s>") # splits the doc into sentences
             if len(src) > seqlength or len(src) < 1:
                 continue
             num_docs += 1
@@ -148,6 +148,9 @@ def get_data(args):
             src_word = []
             for sent in src:
                 sent = word_indexer.clean(sent)
+                if len(sent) == 0:
+                    src_word.append(word_indexer.convert_sequence([word_indexer.PAD] * max_sent_l)) # fill with padding 
+                    continue
                 words = [word_indexer.BOD] + sent.split() + [word_indexer.EOD]
                 if len(words) > max_sent_l:
                     words = words[:max_sent_l]
@@ -175,6 +178,8 @@ def get_data(args):
             doc_id += 1
             if not (doc_id % 100000):
                 print("{}/{} sentences processed".format(doc_id, num_docs))
+
+        pdb.set_trace()
 
         print(doc_id, num_docs)
         #break up batches based on source lengths
