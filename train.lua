@@ -41,7 +41,8 @@ side (instead of word embeddings - this is now required for the document encoder
 cmd:option('-reverse_src', 0, [[If 1, reverse the source sequence. The original 
 sequence-to-sequence paper found that this was crucial to 
 achieving good performance, but with attention models this
-does not seem necessary. Recommend leaving it to 0]]) -- TODO: need bidirectional
+does not seem necessary. Recommend leaving it to 0]])
+cmd:option('-bidirectional', 0, [[If 1 do bidirectional encoding]]) -- test this
 cmd:option('-init_dec', 1, [[Initialize the hidden/cell state of the decoder at time 
 0 to be the last hidden/cell state of the encoder. If 0, 
 the initial states of the decoder are set to zero vectors]])
@@ -84,10 +85,10 @@ on the validation set or (ii) epoch has gone past the start_decay_at_limit]])
 cmd:option('-start_decay_at', 9, [[Start decay after this epoch]])
 cmd:option('-curriculum', 0, [[For this many epochs, order the minibatches based on source
 sequence length. Sometimes setting this to 1 will increase convergence speed.]]) 
-cmd:option('-prob_curriculum_epochs', 1, [[Curriculum training on p_t: feed the actual prob into next LSTM instead of prediction for this number of epochs]]) -- TODO: implement curriculum from their code
-cmd:option('-pre_word_vecs_enc', '', [[If a valid path is specified, then this will load 
+cmd:option('-prob_curriculum_epochs', 1, [[Curriculum training on p_t: feed the actual prob into next LSTM instead of prediction for this number of epochs]]) -- TODO: tune this
+cmd:option('-pre_word_vecs_enc', 'data/word2vec.hdf5', [[If a valid path is specified, then this will load 
 pretrained word embeddings (hdf5 file) on the encoder side. 
-See README for specific formatting instructions.]]) -- TODO: load with word2vec
+See README for specific formatting instructions.]])
 --cmd:option('-pre_word_vecs_dec', '', [[If a valid path is specified, then this will load 
 --pretrained word embeddings (hdf5 file) on the decoder side. 
 --See README for specific formatting instructions.]])
@@ -189,6 +190,12 @@ function train(train_data, valid_data)
   -- prototypes for gradients so there is no need to clone
   local encoder_grad_proto = torch.zeros(valid_data.batch_l:max(), opt.max_sent_l, opt.rnn_size)
   local encoder_grad_proto2 = torch.zeros(valid_data.batch_l:max(), opt.max_sent_l, opt.rnn_size)
+  local rev_encoder_grad_proto
+  local rev_encoder_grad_proto2
+  if opt.bidirectional == 1 then
+    rev_encoder_grad_proto = torch.zeros(valid_data.batch_l:max(), opt.max_sent_l, opt.rnn_size)
+    rev_encoder_grad_proto2 = torch.zeros(valid_data.batch_l:max(), opt.max_sent_l, opt.rnn_size)
+  end
   context_proto = torch.zeros(valid_data.batch_l:max(), opt.max_sent_l, opt.rnn_size)
   context_proto2 = torch.zeros(valid_data.batch_l:max(), opt.max_sent_l, opt.rnn_size)
   sent_enc_proto = torch.zeros(valid_data.batch_l:max(), opt.max_sent_l, opt.num_kernels)
@@ -197,6 +204,7 @@ function train(train_data, valid_data)
   -- clone encoder/decoder up to max source/target length   
   decoder_clones = clone_many_times(decoder, opt.max_sent_l)
   encoder_clones = clone_many_times(encoder, opt.max_sent_l)
+  rev_encoder_clones = clone_many_times(rev_encoder, opt.max_sent_l)
   sent_conv_model_clones = clone_many_times(sent_conv_model, opt.max_sent_l) -- added by Jeffrey
   for i = 1, opt.max_sent_l do
     attn_clones_idx = i
@@ -317,9 +325,9 @@ function train(train_data, valid_data)
       local target, target_out, nonzeros, source = d[1], d[2], d[3], d[4]
       local batch_l, target_l, source_l = d[5], d[6], d[7]
       assert(source_l == target_l, source_l .. " " .. target_l)
-      if opt.reverse_src == 1 then
-        local source_rev = d[8] -- for bidirectional
-        -- TODO: bidirectional - need to clone another encoder LSTM, and feed it source_rev
+      local source_rev -- for bidirectional
+      if opt.bidirectional == 1 then
+        source_rev = d[8]
       end
 
       local encoder_grads = encoder_grad_proto[{{1, batch_l}, {1, source_l}}]
@@ -675,15 +683,9 @@ end
 
 function get_layer(layer)
   if layer.name ~= nil then
-    if layer.name == 'word_vecs_dec' then
-      word_vecs_dec = layer	 
-    elseif layer.name == 'word_vecs_enc' then
-      word_vecs_enc = layer
-    elseif layer.name == 'word_vecs' then
+    if layer.name == 'word_vecs' then
       -- we don't have decoder word vecs.
       word_vecs_enc = layer
-    elseif layer.name == 'decoder_attn' then	 
-      decoder_attn = layer
     end
   end
 end
@@ -731,6 +733,9 @@ function main()
     print('Building model')
     encoder = make_lstm(valid_data, opt, 'enc')
     decoder = make_lstm(valid_data, opt, 'dec')
+    if opt.bidirectional == 1 then
+      rev_encoder = encoder:clone() -- for bidirectional
+    end
     sent_conv_model = make_sent_conv(valid_data, opt) -- added by Jeffrey
     criterion = make_criterion(opt)
   else
@@ -746,6 +751,9 @@ function main()
   end   
 
   layers = {encoder, decoder, sent_conv_model}
+  if opt.bidirectional == 1 then
+    table.insert(layers, rev_encoder)
+  end
 
   if opt.gpuid >= 0 then
     opt.cudnn = 1 -- added by Jeffrey
@@ -767,6 +775,7 @@ function main()
 
   encoder:apply(get_layer)   
   decoder:apply(get_layer)   
+  rev_encoder:apply(get_layer)
   sent_conv_model:apply(get_layer)
 
   print('Training...')
