@@ -220,8 +220,10 @@ function train(train_data, valid_data)
     if encoder_clones[i].apply then
       encoder_clones[i]:apply(function(m) m:setReuse() end)
     end
-    if rev_encoder_clones[i].apply then
-      rev_encoder_clones[i]:apply(function(m) m:setReuse() end)
+    if opt.bidirectional == 1 then
+      if rev_encoder_clones[i].apply then
+        rev_encoder_clones[i]:apply(function(m) m:setReuse() end)
+      end
     end
   end   
 
@@ -242,11 +244,13 @@ function train(train_data, valid_data)
       context_proto2 = context_proto2:cuda()	 
     else
       context_proto = context_proto:cuda()
-      rev_context_proto = rev_context_proto:cuda() -- bidirectional
       sent_enc_proto = sent_enc_proto:cuda() -- added by Jeffrey
       sent_enc_grad_proto = sent_enc_grad_proto:cuda()
       encoder_grad_proto = encoder_grad_proto:cuda()	 
-      rev_encoder_grad_proto = rev_encoder_grad_proto:cuda() -- bidirectional
+      if opt.bidirectional == 1 then
+        rev_context_proto = rev_context_proto:cuda() -- bidirectional
+        rev_encoder_grad_proto = rev_encoder_grad_proto:cuda()
+      end
     end
   end
 
@@ -438,7 +442,9 @@ function train(train_data, valid_data)
 
       -- backward prop decoder
       encoder_grads:zero()	 
-      rev_encoder_grads:zero()
+      if opt.bidirectional == 1 then
+        rev_encoder_grads:zero()
+      end
       sent_enc_grads:zero()
       local drnn_state_dec = reset_state(init_bwd_dec, batch_l, 1)
       local loss = 0
@@ -867,8 +873,10 @@ function main()
 
   encoder:apply(get_layer)   
   decoder:apply(get_layer)   
-  rev_encoder:apply(get_layer)
   sent_conv_model:apply(get_layer)
+  if opt.bidirectional == 1 then
+    rev_encoder:apply(get_layer)
+  end
 
   print('Training...')
   train(train_data, valid_data)
