@@ -661,9 +661,9 @@ function train(train_data, valid_data)
 
   print('saving final model to ' .. savefile)   
   if opt.bidirectional == 1 then
-    torch.save(savefile, {{encoder:double(), decoder:double(), sent_conv_model:double()}, opt})   
-  else
     torch.save(savefile, {{encoder:double(), decoder:double(), sent_conv_model:double(), rev_encoder:double()}, opt})   
+  else
+    torch.save(savefile, {{encoder:double(), decoder:double(), sent_conv_model:double()}, opt})   
 
   end
 
@@ -846,6 +846,9 @@ function main()
     encoder = model[1]:double()
     decoder = model[2]:double()      
     sent_conv_model = model[3]:double()
+    if opt.bidirectional == 1 then
+      rev_encoder = model[4]:double()
+    end
     --generator = model[3]:double()
     criterion = make_criterion(opt)
   end   
