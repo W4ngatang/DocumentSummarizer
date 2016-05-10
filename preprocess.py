@@ -87,7 +87,6 @@ def build_embeds(fname, outfile, words):
                     word_vecs[word] = np.fromstring(f.read(binary_len), dtype='float32')
                 else:
                     f.read(binary_len)
-        pdb.set_trace()
         return word_vecs
 
     word_vecs = load_bin_vec(fname, words)
@@ -96,8 +95,8 @@ def build_embeds(fname, outfile, words):
     for word, vec in word_vecs.iteritems():
         embeds[words[word]-1] = vec
 
-    f = h5py.File(outfile, "w")
-    f["source"] = np.array(embeds) # sources is now binary where 1 = not pad, 0 = pad
+    f = h5py.File(outfile+".hdf5", "w")
+    f["word_vecs"] = np.array(embeds) # sources is now binary where 1 = not pad, 0 = pad
     f.close()
 
     #return embeds

@@ -101,6 +101,7 @@ cmd:text("")
 
 cmd:option('-start_symbol', 1, [[Use special start-of-sentence and end-of-sentence tokens
 on the source side. We've found this to make minimal difference]])
+cmd:option('-predfile', '', [[File to write predictions to, empty for no predictions]])
 -- GPU
 cmd:option('-gpuid', -1, [[Which gpu to use. -1 = use CPU]])
 cmd:option('-gpuid2', -1, [[If this is >= 0, then the model will use two GPUs whereby the encoder
@@ -158,10 +159,11 @@ function train(train_data, valid_data)
   end
 
   if opt.pre_word_vecs_enc:len() > 0 then   
+    print('Loading pretrained embeddings')
     local f = hdf5.open(opt.pre_word_vecs_enc)     
     local pre_word_vecs = f:read('word_vecs'):all()
     for i = 1, pre_word_vecs:size(1) do
-      word_vecs_enc.weight[1]:copy(pre_word_vecs[i])
+      word_vecs_enc.weight[i]:copy(pre_word_vecs[i])
     end      
   end
   --if opt.pre_word_vecs_dec:len() > 0 then      
@@ -303,7 +305,6 @@ function train(train_data, valid_data)
     local start_time = timer:time().real
     local num_words_target = 0
     local num_words_source = 0
-
 
     for i = 1, data:size() do
       zero_table(grad_params, 'zero')
@@ -539,12 +540,18 @@ function train(train_data, valid_data)
       torch.save(savefile, {{encoder, decoder, sent_conv_model}, opt})
     end
   end
+
+  if opt.predfile:len() > 0 then   
+    print('Generating and writing predictions...')
+    predict(valid_data)
+  end
   -- save final model
   local savefile = string.format('%s_final.t7', opt.savefile)
   clean_layer(encoder); clean_layer(decoder); clean_layer(sent_conv_model) -- clean_layer(generator)
   print('saving final model to ' .. savefile)   
   --torch.save(savefile, {{encoder:double(), decoder:double(), generator:double()}, opt})   
   torch.save(savefile, {{encoder:double(), decoder:double(), sent_conv_model:double()}, opt})   
+
 end
 
 function eval(data)
@@ -554,6 +561,66 @@ function eval(data)
   --generator:evaluate()
   local nll = 0
   local total = 0
+  for i = 1, data:size() do
+    local d = data[i]
+    local target, target_out, nonzeros, source = d[1], d[2], d[3], d[4]
+    local batch_l, target_l, source_l = d[5], d[6], d[7]
+    local rnn_state_enc = reset_state(init_fwd_enc, batch_l, 1)
+    local context = context_proto[{{1, batch_l}, {1, source_l}}]
+    local sent_enc = sent_enc_proto[{{1, batch_l}, {1, source_l}}]
+    -- forward prop encoder
+    for t = 1, source_l do
+      local s = sent_conv_model_clones[1]:forward(source[t])
+      sent_enc[{{},t}]:copy(s) -- sent_enc is a dictionary; {{}, t} is the key the hidden state of sentence t
+      local encoder_input = {s, table.unpack(rnn_state_enc)}
+      local out = encoder_clones[1]:forward(encoder_input)
+      rnn_state_enc = out
+      context[{{},t}]:copy(out[#out]) -- context is dict where {{}, t} gets the doc encoding at timestep t
+    end
+
+    if opt.gpuid >= 0 and opt.gpuid2 >= 0 then
+      cutorch.setDevice(opt.gpuid2)
+      local context2 = context_proto2[{{1, batch_l}, {1, source_l}}]
+      context2:copy(context)
+      context = context2
+    end
+
+    local rnn_state_dec = reset_state(init_fwd_dec, batch_l, 1)
+    if opt.init_dec == 1 then
+      for L = 1, opt.num_layers do
+        rnn_state_dec[L*2]:copy(rnn_state_enc[L*2-1])
+        rnn_state_dec[L*2+1]:copy(rnn_state_enc[L*2])
+      end	 
+    end      
+    local loss = 0
+    for t = 1, target_l do
+      -- at each decoding step, decoder receives the sentence encoding, the context (doc encoding up to that point), decoding state
+      local decoder_input = {sent_enc[{{},t}], context[{{},t}], table.unpack(rnn_state_dec)}
+      local out = decoder_clones[1]:forward(decoder_input)
+      rnn_state_dec = {}
+      table.insert(rnn_state_dec, out[#out])
+      for j = 1, #out-1 do
+        table.insert(rnn_state_dec, out[j])
+      end
+      --local pred = generator:forward(out[#out])
+      local pred = out[#out]
+      loss = loss + criterion:forward(pred, target_out[t])
+    end
+    nll = nll + loss
+    total = total + nonzeros
+  end
+  local valid = math.exp(nll / total)
+  print("Valid", valid)
+  return valid
+end
+
+function predict(data)
+  encoder_clones[1]:evaluate()   
+  decoder_clones[1]:evaluate() -- just need one clone
+  sent_conv_model_clones[1]:evaluate()
+  --generator:evaluate()
+  local predictions = torch.zeros(data.target:size())
+  local pred_cur = 1
   for i = 1, data:size() do
     local d = data[i]
     local target, target_out, nonzeros, source = d[1], d[2], d[3], d[4]
@@ -596,16 +663,15 @@ function eval(data)
       end
       --local pred = generator:forward(out[#out])
       local pred = out[#out]
-      loss = loss + criterion:forward(pred, target_out[t])
+      predictions:sub(pred_cur, pred_cur+batch_l-1,t,t):copy(pred)
     end
-    nll = nll + loss
-    total = total + nonzeros
+    pred_cur = pred_cur + batch_l
   end
-  local valid = math.exp(nll / total)
-  print("Valid", valid)
-  return valid
-end
 
+  local f = hdf5.open(opt.predfile, 'w')
+  f:write('preds', predictions)  
+  f:close()
+end
 
 function get_layer(layer)
   if layer.name ~= nil then
@@ -662,6 +728,7 @@ function main()
 
   -- Build model
   if opt.train_from:len() == 0 then
+    print('Building model')
     encoder = make_lstm(valid_data, opt, 'enc')
     decoder = make_lstm(valid_data, opt, 'dec')
     sent_conv_model = make_sent_conv(valid_data, opt) -- added by Jeffrey
@@ -702,6 +769,7 @@ function main()
   decoder:apply(get_layer)   
   sent_conv_model:apply(get_layer)
 
+  print('Training...')
   train(train_data, valid_data)
 end
 
