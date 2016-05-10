@@ -12,6 +12,7 @@ import h5py
 import itertools
 import pdb
 import re
+import pickle
 from collections import defaultdict
 
 class Indexer:
@@ -21,7 +22,7 @@ class Indexer:
         self.UNK = symbols[1]
         self.BOD = symbols[2]
         self.EOD = symbols[3]
-        self.d = {self.PAD: 1, self.UNK: 2, self.BOD: 3, self.EOD: 4} # should there be an BOD/EOD?
+        self.d = {self.PAD: 1, self.UNK: 2, self.BOD: 3, self.EOD: 4}
 
     def add_w(self, ws):
         for w in ws:
@@ -31,8 +32,11 @@ class Indexer:
     def convert(self, w):
         return self.d[w] if w in self.d else self.d[self.UNK]
 
+    def convert_full(self, w):
+        return self.word2ind[w] 
+
     def convert_sequence(self, ls):
-        return [self.convert(l) for l in ls]
+        return ([self.convert(l) for l in ls], [self.convert_full(l) for l in ls])
 
     def clean(self, s):
         s = s.replace(self.PAD, "")
@@ -57,6 +61,20 @@ class Indexer:
         for word in self.pruned_vocab:
             if word not in self.d:
                 self.d[word] = len(self.d) + 1
+
+    def full_vocab(self):
+        self.word2ind = {}
+        self.ind2word = {}
+        for k, v in self.d.iteritems():
+            self.word2ind[k] = v
+            self.ind2word[v] = k
+        vocab_list = [(word, count) for word, count in self.vocab.iteritems()]
+        vocab_list.sort(key = lambda x: x[1], reverse=True) # could skip to the remaining V - k?
+        for word,_ in vocab_list:
+            if word not in self.word2ind:
+                ind = len(self.word2ind)+1
+                self.word2ind[word] = ind
+                self.ind2word[ind] = word
 
     def load_vocab(self, vocab_file):
         self.d = {}
@@ -99,8 +117,6 @@ def build_embeds(fname, outfile, words):
     f["word_vecs"] = np.array(embeds) # sources is now binary where 1 = not pad, 0 = pad
     f.close()
 
-    #return embeds
-
 def pad(ls, length, symbol):
     if len(ls) >= length:
         return ls[:length]
@@ -132,7 +148,7 @@ def get_data(args):
                 
         return max_sent_l, num_docs
                 
-    def convert(srcfile, targetfile, batchsize, seqlength, outfile, num_docs,
+    def convert(srcfile, targetfile, targettxtfile, batchsize, seqlength, outfile, num_docs,
                 max_sent_l, max_doc_l=0, unkfilter=0):
         
         newseqlength = seqlength + 2 #add 2 for EOS and BOS; length in sents of the longest document
@@ -141,10 +157,15 @@ def get_data(args):
         sources = np.zeros((num_docs, newseqlength), dtype=int) # input split into sentences
         source_lengths = np.zeros((num_docs,), dtype=int) # lengths of each document
         target_lengths = np.zeros((num_docs,), dtype=int) # lengths of each target sequence
-        sources_word = np.zeros((num_docs, newseqlength, max_sent_l), dtype=int) # input  by word
+        sources_word = np.zeros((num_docs, newseqlength, max_sent_l), dtype=int) # input by word
+        sources_word_full = np.zeros((num_docs, newseqlength, max_sent_l), dtype=int) # input by word, no unknowns
         dropped = 0
         doc_id = 0
-        for _, (src_orig, targ_orig) in \
+        srcfile_prune = open("pruned-src-"+outfile, "w+") # file to write pruned dataset to
+        targfile_prune = open("pruned-targ-"+outfile, "w+") # file to write pruned dataset to
+        targettxt_f = open(targettxtfile, 'r')
+        targettxts = targettxt_f.read().split('\n')[:-1]
+        for i, (src_orig, targ_orig) in \
                 enumerate(itertools.izip(open(srcfile,'r'), open(targetfile,'r'))):
             src_orig = src_indexer.clean(src_orig.decode("utf-8").strip())
             targ = [0] + targ_orig.strip().split() + [0] # targ and src should be same length
@@ -157,19 +178,25 @@ def get_data(args):
             targ = np.array(targ, dtype=int)
             #targ += 1 # 1-indexing for lua
 
+            srcfile_prune.write(src_orig+"\n") # write sentence if it survived pruning
+            targfile_prune.write(targettxts[i]+"\n")
             src = pad(src, newseqlength, src_indexer.PAD)
             src_word = []
+            src_word_full = []
             for sent in src:
                 sent = word_indexer.clean(sent)
                 if len(sent) == 0:
-                    src_word.append(word_indexer.convert_sequence([word_indexer.PAD] * max_sent_l)) # fill with padding 
+                    pad_word, pad_word_full = word_indexer.convert_sequence([word_indexer.PAD] * max_sent_l)
+                    src_word.append(pad_word) # fill with padding 
+                    src_word_full.append(pad_word_full) # fill with padding 
                     continue
                 words = [word_indexer.BOD] + sent.split() + [word_indexer.EOD]
                 if len(words) > max_sent_l:
                     words = words[:max_sent_l]
                     words[-1] = word_indexer.EOD
-                word_idx = word_indexer.convert_sequence(pad(words, max_sent_l, word_indexer.PAD))
+                word_idx, word_idx_full = word_indexer.convert_sequence(pad(words, max_sent_l, word_indexer.PAD))
                 src_word.append(word_idx)
+                src_word_full.append(word_idx_full)
             src = [1 if x != src_indexer.PAD else 0 for x in src] # 0 if pad, 1 o.w.
             src = np.array(src, dtype=int)
             
@@ -188,9 +215,12 @@ def get_data(args):
             source_lengths[doc_id] = (sources[doc_id] == 1).sum()            
             target_lengths[doc_id] = source_lengths[doc_id]
             sources_word[doc_id] = np.array(src_word, dtype=int)
+            sources_word_full[doc_id] = np.array(src_word_full, dtype=int)
             doc_id += 1
             if not (doc_id % 100000):
                 print("{}/{} sentences processed".format(doc_id, num_docs))
+
+        srcfile_prune.close()
 
         #break up batches based on source lengths
         # get source_lengths into a particular shape then sort by length
@@ -246,7 +276,10 @@ def get_data(args):
         f["target_size"] = np.array([2]) #np.array([len(target_indexer.d)])
         del sources, targets, target_output
         sources_word = sources_word[source_sort]
+        sources_word_full = sources_word_full[source_sort]
+        f["source_order"] = source_sort
         f["source_char"] = sources_word
+        f["source_char_full"] = sources_word_full
         del sources_word
         f["char_size"] = np.array([len(word_indexer.d)])
         print("Saved {} documents (dropped {} due to length/unk filter)".format(
@@ -267,7 +300,10 @@ def get_data(args):
 
     #prune and write vocab
     word_indexer.prune_vocab(args.srcvocabsize)
+    word_indexer.full_vocab() # get full vocabulary and reverse dictionaries for later
     word_indexer.write(args.outputfile + ".word.dict")
+    with open(args.outputfile+".dicts.hdf5", "wb") as dict_file:
+        pickle.dump((word_indexer.word2ind, word_indexer.ind2word), dict_file)
     print("Word vocab size: Original = {}, Pruned = {}".format(len(word_indexer.vocab), 
                                                           len(word_indexer.d)))
 
@@ -276,10 +312,10 @@ def get_data(args):
         build_embeds(args.srcvocabfile, args.vocabfile, word_indexer.d)
 
     max_doc_l = 0
-    max_doc_l = convert(args.srcvalfile, args.targetvalfile, args.batchsize, args.seqlength,
+    max_doc_l = convert(args.srcvalfile, args.targetidxvalfile, args.targetvalfile, args.batchsize, args.seqlength,
                          args.outputfile + "-val.hdf5", num_docs_valid,
                          max_sent_l, max_doc_l, args.unkfilter)
-    max_doc_l = convert(args.srcfile, args.targetfile, args.batchsize, args.seqlength,
+    max_doc_l = convert(args.srcfile, args.targetidxfile, args.targetfile, args.batchsize, args.seqlength,
                          args.outputfile + "-train.hdf5", num_docs_train, max_sent_l,
                          max_doc_l, args.unkfilter)
     
@@ -303,8 +339,12 @@ def main(arguments):
     parser.add_argument('--targetfile', help="Path to target training data, "
                                            "where each line represents a single "
                                            "source/target sequence.")
+    parser.add_argument('--targetidxfile', help="Path to target index data, "
+                                                "indicating whether a sentence "
+                                                "is taken for the summary.")
     parser.add_argument('--srcvalfile', help="Path to source validation data.")
-    parser.add_argument('--targetvalfile', help="Path to target validation data.")
+    parser.add_argument('--targetvalfile', help="Path to target txt validation data.")
+    parser.add_argument('--targetidxvalfile', help="Path to target validation data.")
     parser.add_argument('--batchsize', help="Size of each minibatch.", type=int, default=64)
     parser.add_argument('--seqlength', help="Maximum sequence length. Sequences longer "
                                                "than this are dropped.", type=int, default=50)

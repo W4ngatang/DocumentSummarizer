@@ -106,7 +106,7 @@ def featurize(source, targ):
         uni, bi = gram_feats(sentence, targ) # below, take dot product of weights and features
         try:
             features.append([uni, bi, float(i+1)])#, num_entities[i]])
-        except:
+        except Exception as e:
             pdb.set_trace()
 
     return features
@@ -133,7 +133,7 @@ def tune(args):
                     y.append(0)
                 else:
                     y.append(1)
-            except:
+            except Exception as e:
                 pdb.set_trace()
         if not (i % 50):
             print "Featurized %d" % i
@@ -166,10 +166,14 @@ def prune(args, model, data):
     val_flag = 0
     srcfile = open(args.outfile+'-src.txt', 'w+')
     targfile = open(args.outfile+'-targ.txt', 'w+')
+    idxfile = open(args.outfile+'-idx.txt', 'w+')
     docfile = open(args.srcfile, 'r')
     documents = docfile.read().split("\n")[:-1]
+    summfile = open(args.targfile, 'r')
+    summaries = summfile.read().split("\n")[:-1]
     accepted = []
-    accepted_t = []
+    accepted_t = [] # target sequence
+    accepted_i = [] # indices
     ndocs = 0.
     for i in xrange(len(data)):
         try:
@@ -178,7 +182,8 @@ def prune(args, model, data):
             predictions = model.predict(data[i])
             if sum(predictions) > args.thresh: # if there is a nonzero entry
                 accepted.append(clean(documents[i]))
-                accepted_t.append(predictions)
+                accepted_i.append(predictions)
+                accepted_t.append(clean(summaries[i]))
                 ndocs += 1
             if not (i % 10000):
                 print "Pruned %d" % i
@@ -187,16 +192,18 @@ def prune(args, model, data):
             pdb.set_trace()
 
     print "Writing training data..."
-    for i,(doc,seq) in enumerate(zip(accepted, accepted_t)):
+    for i,(doc,seq) in enumerate(zip(accepted, accepted_i)):
         try:
             srcfile.write(doc+'\n')
-            targfile.write(np.array_str(seq, 1000)[1:-1]+'\n') # fkin numpy and their max line widths
+            idxfile.write(np.array_str(seq, 1000)[1:-1]+'\n') # fkin numpy and their max line widths
+            targfile.write(accepted_t[i]+'\n')
             if i > split*ndocs and not val_flag:
                 print "Writing validation data..."
                 srcfile.close()
                 targfile.close()
                 srcfile = open(args.outfile+'-valid-src.txt', 'w+')
                 targfile = open(args.outfile+'-valid-targ.txt', 'w+')
+                idxfile = open(args.outfile+'-valid-idx.txt', 'w+')
                 val_flag = 1
         except Exception as e:
             print "Fukin shit"
@@ -211,7 +218,7 @@ def main(arguments):
     parser.add_argument('--pickle', help="Load from pickle or no", type =int, default=1)
     parser.add_argument('--pickle_file', help="Path to pretrained pickle file to read or write. ", type = str, default='cnn.pkl')
     parser.add_argument('--thresh', help="Threshold for number of overlap sentences to be accepted. ", type=int, default=2)
-    parser.add_argument('--outfile', help="Prefix of the output file names. ", type=str, default="extract")
+    parser.add_argument('--outfile', help="Prefix of the output file names. ", type=str)
     parser.add_argument('--split', help="Fraction of the data in train/valid. ", type=float, default=.8)
     parser.add_argument('--loss', help="Type of loss to use for classifier. ", type=str, default="hinge")
     parser.add_argument('--train', help="Path to classifier training docs. ", type=str, default="valid-src.txt")
