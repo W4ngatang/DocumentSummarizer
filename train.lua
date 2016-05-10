@@ -43,7 +43,7 @@ sequence-to-sequence paper found that this was crucial to
 achieving good performance, but with attention models this
 does not seem necessary. Recommend leaving it to 0]])
 cmd:option('-bidirectional', 0, [[If 1 do bidirectional encoding]]) -- test this
-cmd:option('-init_dec', 1, [[Initialize the hidden/cell state of the decoder at time 
+cmd:option('-init_dec', 0, [[Initialize the hidden/cell state of the decoder at time 
 0 to be the last hidden/cell state of the encoder. If 0, 
 the initial states of the decoder are set to zero vectors]])
 cmd:option('-hop_attn', 0, [[If > 0, then use a *hop attention* on this layer of the decoder. 
@@ -528,8 +528,8 @@ function train(train_data, valid_data)
         local drnn_state_rev_enc = reset_state(init_bwd_rev_enc, batch_l, 1)
         if opt.init_dec == 1 then
           for L = 1, opt.num_layers do
-            drnn_state_rev_enc[L*2-1]:copy(drnn_state_rev_dec[L*2-1])
-            drnn_state_rev_enc[L*2]:copy(drnn_state_rev_dec[L*2])
+            drnn_state_rev_enc[L*2-1]:copy(drnn_state_dec[L*2-1])
+            drnn_state_rev_enc[L*2]:copy(drnn_state_dec[L*2])
           end	    
         end
 
@@ -650,7 +650,7 @@ function train(train_data, valid_data)
 
   if opt.predfile:len() > 0 then   
     print('Generating and writing predictions...')
-    eval(valid_data, 1)
+    eval(valid_data, 1) -- 1 for predict
   end
   -- save final model
   local savefile = string.format('%s_final.t7', opt.savefile)
@@ -720,11 +720,13 @@ function eval(data, do_predict)
     end
 
     -- forward prop reverse encoder
-    for t = 1, source_l do
-      local encoder_input = {sent_enc[{{},source_l-t+1}], table.unpack(rnn_state_rev_enc)}
-      local out = rev_encoder_clones[1]:forward(encoder_input)
-      rnn_state_rev_enc = out
-      rev_context[{{},t}]:copy(out[#out]) -- context is dict where {{}, t} gets the doc encoding at timestep t
+    if opt.bidirectional == 1 then
+      for t = 1, source_l do
+        local encoder_input = {sent_enc[{{},source_l-t+1}], table.unpack(rnn_state_rev_enc)}
+        local out = rev_encoder_clones[1]:forward(encoder_input)
+        rnn_state_rev_enc = out
+        rev_context[{{},t}]:copy(out[#out]) -- context is dict where {{}, t} gets the doc encoding at timestep t
+      end
     end
 
     --if opt.gpuid >= 0 and opt.gpuid2 >= 0 then

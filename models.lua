@@ -111,7 +111,7 @@ function make_lstm(data, opt, model)
     local term2
     if opt.bidirectional == 1 then
       -- bidirectional has 2*rnn_size context
-      term2 = nn.LinearNoBias(2*rnn_size, 1)(nn.ConcatTable()(inputs[offset]))
+      term2 = nn.LinearNoBias(2*rnn_size, 1)(nn.JoinTable(2)(inputs[offset]))
     else
       term2 = nn.LinearNoBias(rnn_size, 1)(inputs[offset])
     end
