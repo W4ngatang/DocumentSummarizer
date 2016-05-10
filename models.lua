@@ -40,8 +40,8 @@ function make_lstm(data, opt, model)
    local inputs = {}
    table.insert(inputs, nn.Identity()()) -- x (batch_size x max_word_l)
    if model == 'dec' then
-      -- TODO: this needs to be bidirectional
       table.insert(inputs, nn.Identity()()) -- source context h_t (batch_size x rnn_size)
+      -- if bidirectional h_t will be (batch_size x 2*rnn_size)
       table.insert(inputs, nn.Identity()()) -- previous prob p_{t-1} (batch_size x 1)
       offset = offset + 2
    end   
@@ -108,7 +108,13 @@ function make_lstm(data, opt, model)
   if model == 'dec' then
     local top_h = outputs[#outputs]
     local term1 = nn.LinearNoBias(rnn_size, 1)(top_h)
-    local term2 = nn.LinearNoBias(rnn_size, 1)(inputs[offset])
+    local term2
+    if opt.bidirectional == 1 then
+      -- bidirectional has 2*rnn_size context
+      term2 = nn.LinearNoBias(2*rnn_size, 1)(nn.ConcatTable()(inputs[offset]))
+    else
+      term2 = nn.LinearNoBias(rnn_size, 1)(inputs[offset])
+    end
     local pred_prob = nn.Sigmoid()(nn.CAddTable()({term1, term2}))
     table.insert(outputs, pred_prob) -- p_t for sentence label, batch_l x 1
   end

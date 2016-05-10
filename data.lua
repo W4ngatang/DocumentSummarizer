@@ -59,10 +59,9 @@ function data:__init(opt, data_file)
 	 source_i =  self.source:sub(self.batch_idx[i], self.batch_idx[i]+self.batch_l[i]-1,
 				     1, self.source_l[i]):transpose(1,2)
       end
-      local source_i_rev
-      if opt.bidirectional == 1 then
+      if opt.reverse_src == 1 then
         -- bidirectional, added by Jeffrey
-	      source_i_rev = source_i:index(1, source_l_rev[{{max_source_l-self.source_l[i]+1,
+	      source_i = source_i:index(1, source_l_rev[{{max_source_l-self.source_l[i]+1,
 						     max_source_l}}])
       end      
 
@@ -74,27 +73,14 @@ function data:__init(opt, data_file)
 	 target_i = self.target:sub(self.batch_idx[i], self.batch_idx[i]+self.batch_l[i]-1,
 				    1, self.target_l[i]):transpose(1,2)
       end
-      if opt.bidirectional == 1 then
-        -- bidirectional added by Jeffrey
-        table.insert(self.batches,  {target_i,
-            target_output_i:transpose(1,2),
-            self.target_nonzeros[i], 
-            source_i,
-            self.batch_l[i],
-            self.target_l[i],
-            self.source_l[i],
-            target_l_i,
-            source_i_rev})
-      else
-        table.insert(self.batches,  {target_i,
-            target_output_i:transpose(1,2),
-            self.target_nonzeros[i], 
-            source_i,
-            self.batch_l[i],
-            self.target_l[i],
-            self.source_l[i],
-            target_l_i})
-      end
+      table.insert(self.batches,  {target_i,
+          target_output_i:transpose(1,2),
+          self.target_nonzeros[i], 
+          source_i,
+          self.batch_l[i],
+          self.target_l[i],
+          self.source_l[i],
+          target_l_i})
    end
 end
 
