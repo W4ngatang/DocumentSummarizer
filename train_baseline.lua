@@ -54,6 +54,8 @@ to have the norm equal to max_grad_norm]])
 cmd:option('-lr_decay', 0.5, [[Decay learning rate by this much if (i) perplexity does not decrease
 on the validation set or (ii) epoch has gone past the start_decay_at_limit]])
 cmd:option('-start_decay_at', 9, [[Start decay after this epoch]])
+cmd:option('-curriculum', 0, [[For this many epochs, order the minibatches based on source
+sequence length. Sometimes setting this to 1 will increase convergence speed.]]) 
 cmd:option('-pre_word_vecs_enc', 'data/word2vec.hdf5', [[If a valid path is specified, then this will load 
 pretrained word embeddings (hdf5 file) on the encoder side. 
 See README for specific formatting instructions.]])
@@ -187,7 +189,8 @@ function train(train_data, valid_data)
       -- backward 
       local loss = 0
       for t = 1, target_l do
-        loss = loss + criterion:forward(preds, target_out[t])/batch_l
+        local pred = preds[t]
+        loss = loss + criterion:forward(pred, target_out[t])/batch_l
         local dl_dpred = criterion:backward(pred, target_out[t])
         dl_dpred:div(batch_l)
         logreg_clones[t]:backward(source[t], dl_dpred)
@@ -208,7 +211,7 @@ function train(train_data, valid_data)
         grad_params:mul(shrinkage)
       end	    
       params:add(grad_params:mul(-opt.learning_rate))
-      param_norm = params[j]:norm()
+      param_norm = params:norm()
 
       -- Bookkeeping
       num_words_target = num_words_target + batch_l*target_l
@@ -385,7 +388,7 @@ function main()
     print('loading ' .. opt.train_from .. '...')
     local checkpoint = torch.load(opt.train_from)
     local model, model_opt = checkpoint[1], checkpoint[2]
-    logreg = model[1]:double()
+    logreg = model:double()
     criterion = make_criterion(opt)
   end   
 
@@ -402,6 +405,7 @@ function main()
     assert(path.exists(opt.train_from), 'train_from needed')
 
     -- Do some annoying inits
+    logreg_clones = {logreg}
     print('Generating and writing predictions...')
     eval(valid_data, 1) -- 1 for predict
   else
