@@ -32,7 +32,7 @@ def gen_preds(args, gold=0):
             for idx in order:
                 sorted_docs.append(docs[idx])
 
-            path = 'tmp_SYSTEM/'+args.system + '/'
+            path = args.outfile + '/tmp_SYSTEM/'+args.system + '/'
             if not os.path.exists(path):
                 os.makedirs(path)
             for i, (doc,pred) in enumerate(zip(sorted_docs,preds)):
@@ -54,7 +54,7 @@ def gen_preds(args, gold=0):
             sorted_docs = [] # need to get pruned version of docs
             for idx in order:
                 sorted_docs.append(docs[idx])
-            path = 'tmp_GOLD/'
+            path = args.outfile + '/tmp_GOLD/'
             if not os.path.exists(path):
                 os.makedirs(path)
             for i, summary in enumerate(sorted_docs):
@@ -76,7 +76,7 @@ def main(arguments):
     parser.add_argument('--srctxt', help="Path to the source text. ", type=str)
     parser.add_argument('--predfile', help="Path to the predictions. ", type=str)
     parser.add_argument('--goldfile', help="Path to the gold standard summaries. ", type=str)
-    parser.add_argument('--outfile', help="Path to the folder that will contain the files. ", type=str, default='')
+    parser.add_argument('--outfile', help="Path to the folder that will contain the files. ", type=str)
     parser.add_argument('--system', help="Name of system; \'gold\' for gold", type=str, default='ne')
     parser.add_argument('--rougedir', help="Name of directory to ROUGE system + reference files", type=str)
     args = parser.parse_args(arguments)

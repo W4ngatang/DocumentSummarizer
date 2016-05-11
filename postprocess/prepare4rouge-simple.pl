@@ -21,13 +21,13 @@ use strict;
 
 
 
-my $OUTPUT_HOME = "tmp_OUTPUT"; #where to generate output 
-my $DIR_SYSTEM="tmp_SYSTEM"; # location of system generated files
-my $DIR_GOLD="tmp_GOLD"; # location of gold standard files
+my $OUTPUT_HOME = $ARGV[0]; #"tmp_OUTPUT"; #where to generate output 
+my $DIR_SYSTEM= $ARGV[1]; #"tmp_SYSTEM"; # location of system generated files
+my $DIR_GOLD= $ARGV[2]; #"tmp_GOLD"; # location of gold standard files
 
 #`rm -r $OUTPUT_HOME `;
 
-`mkdir $OUTPUT_HOME `;
+#`mkdir $OUTPUT_HOME `;
 `mkdir $OUTPUT_HOME/systems `;
 `mkdir $OUTPUT_HOME/models `;
 
