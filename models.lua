@@ -9,6 +9,16 @@ function nn.Module:setReuse()
    end
 end
 
+function make_baseline(data, opt)
+  local input = nn.Identity()()
+
+  local word_vecs = nn.LookupTable(data.char_size, opt.word_vec_size)
+  word_vecs.name = 'word_vecs'
+  local bow = nn.Sum(2)(word_vecs(input))
+  local output = nn.Sigmoid()(nn.Linear(opt.word_vec_size, 1)(bow))
+  return nn.gModule({input}, {output})
+end
+
 function make_sent_conv(data, opt)
   local input_size = opt.num_kernels
 
