@@ -28,6 +28,8 @@ then training files are in this many partitions]])
 cmd:option('-train_from', '', [[If training from a checkpoint then this is the path to the
 pretrained model.]])
 
+cmd:option('-test_only', 0, [[Test only. Requires predfile and train_from options set]])
+
 -- rnn model specs
 cmd:text("")
 cmd:text("**Model options**")
@@ -131,6 +133,19 @@ function zero_table(t)
     end
     t[i]:zero()
   end
+end
+
+function reset_state(state, batch_l, t)
+  local u = {[t] = {}}
+  for i = 1, #state do
+    state[i]:zero()
+    table.insert(u[t], state[i][{{1, batch_l}}])
+  end
+  if t == 0 then
+    return u
+  else
+    return u[t]
+  end      
 end
 
 function train(train_data, valid_data)
@@ -278,19 +293,6 @@ function train(train_data, valid_data)
     table.insert(init_bwd_rev_enc, h_init_enc:clone())
   end      
   table.insert(init_bwd_dec, h_init_dec_prob:clone():zero()) -- p_t is the last thing output
-
-  function reset_state(state, batch_l, t)
-    local u = {[t] = {}}
-    for i = 1, #state do
-      state[i]:zero()
-      table.insert(u[t], state[i][{{1, batch_l}}])
-    end
-    if t == 0 then
-      return u
-    else
-      return u[t]
-    end      
-  end
 
   function clean_layer(layer)
     if opt.gpuid >= 0 then
@@ -669,6 +671,7 @@ function train(train_data, valid_data)
 
 end
 
+
 function eval(data, do_predict)
   do_predict = do_predict or 0
 
@@ -883,8 +886,60 @@ function main()
     rev_encoder:apply(get_layer)
   end
 
-  print('Training...')
-  train(train_data, valid_data)
+  if opt.test_only == 1 then
+    print('Test only')
+    assert(opt.predfile:len() > 0, 'predfile needed')
+    assert(path.exists(opt.train_from), 'train_from needed')
+
+    -- Do some annoying inits
+    encoder_clones = {encoder}
+    decoder_clones = {decoder}
+    sent_conv_model_clones = {sent_conv_model}
+    if opt.bidirectional == 1 then
+      rev_encoder_clones = {rev_encoder}
+    end
+
+    context_proto = torch.zeros(valid_data.batch_l:max(), opt.max_sent_l, opt.rnn_size)
+    if opt.bidirectional == 1 then
+      -- bidirectional context
+      rev_context_proto = torch.zeros(valid_data.batch_l:max(), opt.max_sent_l, opt.rnn_size)
+    end
+    sent_enc_proto = torch.zeros(valid_data.batch_l:max(), opt.max_sent_l, opt.num_kernels)
+
+    local h_init_dec = torch.zeros(valid_data.batch_l:max(), opt.rnn_size)
+    local h_init_dec_prob = torch.ones(valid_data.batch_l:max(), 1) -- prob p_t, added by Jeffrey
+    local h_init_enc = torch.zeros(valid_data.batch_l:max(), opt.rnn_size)      
+    if opt.gpuid >= 0 then
+      h_init_enc = h_init_enc:cuda()      
+      h_init_dec = h_init_dec:cuda()
+      h_init_dec_prob = h_init_dec_prob:cuda()
+      cutorch.setDevice(opt.gpuid)
+      context_proto = context_proto:cuda()
+      sent_enc_proto = sent_enc_proto:cuda() -- added by Jeffrey
+      if opt.bidirectional == 1 then
+        rev_context_proto = rev_context_proto:cuda() -- bidirectional
+      end
+    end
+
+    init_fwd_enc = {}
+    init_fwd_dec = {h_init_dec_prob:clone()} -- initial context
+    init_fwd_rev_enc = {} -- reverse encoder
+    for L = 1, opt.num_layers do
+      table.insert(init_fwd_enc, h_init_enc:clone())
+      table.insert(init_fwd_enc, h_init_enc:clone())
+      table.insert(init_fwd_dec, h_init_dec:clone()) -- memory cell
+      table.insert(init_fwd_dec, h_init_dec:clone()) -- hidden state
+      table.insert(init_fwd_rev_enc, h_init_enc:clone())
+      table.insert(init_fwd_rev_enc, h_init_enc:clone())
+    end      
+
+    print('Generating and writing predictions...')
+    eval(valid_data, 1) -- 1 for predict
+  else
+    -- Train as usual
+    print('Training...')
+    train(train_data, valid_data)
+  end
 end
 
 main()
