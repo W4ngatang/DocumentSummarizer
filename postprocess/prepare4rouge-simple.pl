@@ -27,7 +27,7 @@ my $DIR_GOLD= $ARGV[2]; #"tmp_GOLD"; # location of gold standard files
 
 #`rm -r $OUTPUT_HOME `;
 
-#`mkdir $OUTPUT_HOME `;
+`mkdir $OUTPUT_HOME `;
 `mkdir $OUTPUT_HOME/systems `;
 `mkdir $OUTPUT_HOME/models `;
 
